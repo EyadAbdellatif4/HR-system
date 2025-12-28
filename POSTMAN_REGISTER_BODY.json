@@ -1,0 +1,17 @@
+{
+  "user_number": "EMP001",
+  "name": "John Doe",
+  "username": "john.doe@example.com",
+  "password": "SecurePassword123!",
+  "address": "123 Main Street, New York, NY 10001",
+  "work_location": "hybrid",
+  "join_date": "2025-01-15",
+  "social_insurance": true,
+  "medical_insurance": true,
+  "title_id": "550e8400-e29b-41d4-a716-446655440000",
+  "departments": [
+    "660e8400-e29b-41d4-a716-446655440000",
+    "770e8400-e29b-41d4-a716-446655440000"
+  ]
+}
+
