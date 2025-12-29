@@ -1,41 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsNotEmpty, IsBoolean, IsDateString, IsUUID, IsEnum, IsArray, ValidateNested, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
-
-export class CreatePhoneDto {
-  @ApiProperty({ example: '+1234567890', description: 'Phone number' })
-  @IsString()
-  @IsNotEmpty()
-  number: string;
-
-  @ApiPropertyOptional({ example: 'Verizon', description: 'Phone company' })
-  @IsString()
-  @IsOptional()
-  company?: string;
-
-  @ApiPropertyOptional({ example: 'Unlimited Plan', description: 'Current plan' })
-  @IsString()
-  @IsOptional()
-  current_plan?: string;
-
-  @ApiPropertyOptional({ example: 'John Doe', description: 'Legal owner' })
-  @IsString()
-  @IsOptional()
-  legal_owner?: string;
-
-  @ApiPropertyOptional({ example: 'Company provided phone', description: 'Comment' })
-  @IsString()
-  @IsOptional()
-  comment?: string;
-
-  @ApiPropertyOptional({ example: true, description: 'Is active', default: true })
-  @IsBoolean()
-  @IsOptional()
-  is_active?: boolean;
-}
+import { IsString, IsNotEmpty, IsBoolean, IsDateString, IsEnum, IsArray, IsOptional, IsUUID, IsEmail, MinLength, MaxLength } from 'class-validator';
+import { ErrorMessage } from '../../shared/enums';
 
 export class CreateUserDto {
-  @ApiProperty({ example: 'EMP001', description: 'User number' })
+  @ApiProperty({ example: 'EMP001', description: 'User number (must be unique)' })
   @IsString()
   @IsNotEmpty()
   user_number: string;
@@ -44,6 +12,29 @@ export class CreateUserDto {
   @IsString()
   @IsNotEmpty()
   name: string;
+
+  @ApiProperty({ 
+    example: 'john.doe@example.com', 
+    description: 'Username/email address (must be unique)',
+    format: 'email'
+  })
+  @IsEmail({}, { message: ErrorMessage.EMAIL_INVALID })
+  @IsNotEmpty({ message: ErrorMessage.USERNAME_REQUIRED })
+  @MaxLength(255, { message: ErrorMessage.USERNAME_MAX_LENGTH })
+  username: string;
+
+  @ApiProperty({ 
+    example: 'SecurePassword123!', 
+    description: 'Password for the user account',
+    minLength: 6,
+    maxLength: 255,
+    format: 'password'
+  })
+  @IsString({ message: ErrorMessage.PASSWORD_MUST_BE_STRING })
+  @IsNotEmpty({ message: ErrorMessage.PASSWORD_REQUIRED })
+  @MinLength(6, { message: ErrorMessage.PASSWORD_MIN_LENGTH })
+  @MaxLength(255, { message: ErrorMessage.PASSWORD_MAX_LENGTH })
+  password: string;
 
   @ApiProperty({ example: '123 Main St, City, Country', description: 'User address' })
   @IsString()
@@ -84,26 +75,29 @@ export class CreateUserDto {
   @IsOptional()
   exit_date?: string;
 
-  @ApiProperty({ example: 'uuid', description: 'Role ID' })
-  @IsUUID()
+  @ApiProperty({ 
+    example: 'user', 
+    description: 'User role',
+    enum: ['admin', 'user']
+  })
+  @IsEnum(['admin', 'user'])
   @IsNotEmpty()
-  role_id: string;
+  role: 'admin' | 'user';
 
-  @ApiPropertyOptional({ example: 'uuid', description: 'Title ID' })
-  @IsUUID()
+  @ApiPropertyOptional({ example: 'Software Engineer', description: 'User title' })
+  @IsString()
   @IsOptional()
-  title_id?: string;
+  title?: string;
 
   @ApiPropertyOptional({ 
-    type: [CreatePhoneDto], 
-    description: 'User phones',
-    example: [{ number: '+1234567890', company: 'Verizon' }]
+    type: [String], 
+    description: 'Personal phone numbers as JSON array',
+    example: ['0145325235', '425235325453']
   })
   @IsArray()
-  @ValidateNested({ each: true })
-  @Type(() => CreatePhoneDto)
+  @IsString({ each: true })
   @IsOptional()
-  phones?: CreatePhoneDto[];
+  personal_phone?: string[];
 
   @ApiPropertyOptional({ 
     type: [String], 
@@ -114,5 +108,15 @@ export class CreateUserDto {
   @IsUUID(undefined, { each: true })
   @IsOptional()
   department_ids?: string[];
+
+  @ApiPropertyOptional({ 
+    type: [String], 
+    description: 'Image URLs to associate with the user',
+    example: ['https://example.com/image1.jpg', 'https://example.com/image2.jpg']
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  images?: string[];
 }
 

@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsInt } from 'class-validator';
+import { IsOptional, IsString, IsEnum } from 'class-validator';
 import { BaseFilterDto } from '../../shared/dto/base-filter.dto';
 
 export class AssetFilterDto extends BaseFilterDto {
@@ -12,6 +12,15 @@ export class AssetFilterDto extends BaseFilterDto {
   @IsString()
   @IsOptional()
   type?: string;
+
+  @ApiPropertyOptional({ 
+    example: 'laptop', 
+    description: 'Filter by asset type',
+    enum: ['phone', 'mobile', 'laptop']
+  })
+  @IsEnum(['phone', 'mobile', 'laptop'])
+  @IsOptional()
+  asset_type?: 'phone' | 'mobile' | 'laptop';
 
   @ApiPropertyOptional({ example: 'Dell XPS 15', description: 'Search by model' })
   @IsString()

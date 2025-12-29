@@ -1,9 +1,42 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { ValidationPipe, HttpException } from '@nestjs/common';
+import { HttpExceptionFilter } from './shared/filters/http-exception.filter';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  
+  // Global validation pipe with better error messages
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+      exceptionFactory: (errors) => {
+        const messages = errors.map((error) => {
+          if (error.constraints) {
+            return Object.values(error.constraints).join(', ');
+          }
+          return `${error.property} has invalid value`;
+        });
+        return new HttpException(
+          {
+            message: messages,
+            error: 'Bad Request',
+            statusCode: 400,
+          },
+          400,
+        );
+      },
+    }),
+  );
+
+  // Global exception filter for consistent error responses
+  app.useGlobalFilters(new HttpExceptionFilter());
   
   // Enable CORS for frontend
   const allowedOrigins = process.env.CORS_ORIGIN 
@@ -18,10 +51,15 @@ async function bootstrap() {
   });
   
   const config = new DocumentBuilder()
-    .setTitle('Email System')
-    .setDescription('The email system API URL as https://email-system.com/api')
+    .setTitle('HR System API')
+    .setDescription('HR System API Documentation - Manage employees, assets, departments, and more')
     .setVersion('1.0')
-    .addTag('email')
+    .addTag('Auth', 'Authentication endpoints')
+    .addTag('Users', 'User management endpoints')
+    .addTag('Roles', 'Role management endpoints')
+    .addTag('Departments', 'Department management endpoints')
+    .addTag('Assets', 'Asset management endpoints')
+    .addTag('Asset Tracking', 'Asset tracking endpoints')
     .addBearerAuth(
       {
         type: 'http',
@@ -44,7 +82,7 @@ async function bootstrap() {
       showRequestHeaders: true,
       tryItOutEnabled: true,
     },
-    customSiteTitle: 'Email System API Documentation',
+    customSiteTitle: 'HR System API Documentation',
     customfavIcon: '/favicon.ico',
     customCss: `
       .swagger-ui .topbar { display: none }

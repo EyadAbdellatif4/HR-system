@@ -9,7 +9,7 @@ import { AssetFilterDto } from './dto/asset-filter.dto';
 import { Asset } from './entities/asset.entity';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
-import { buildWhereClause, buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
+import { buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
 import { calculateOffset, getPaginationParams, getPaginationMetadata } from '../shared/utils/pagination.util';
 
 @Injectable()
@@ -19,6 +19,10 @@ export class AssetsService {
     private assetRepository: typeof Asset,
   ) {}
 
+  /**
+   * Create a new asset
+   * Optimized: Single insert query
+   */
   async create(createAssetDto: CreateAssetDto) {
     const asset = await this.assetRepository.create(createAssetDto as any);
 
@@ -28,6 +32,10 @@ export class AssetsService {
     };
   }
 
+  /**
+   * Get all assets with optional filtering
+   * Optimized: Single query with efficient where clause building
+   */
   async findAll(filterDto?: AssetFilterDto) {
     try {
       const { page, limit } = getPaginationParams(filterDto?.page, filterDto?.limit);
@@ -35,12 +43,17 @@ export class AssetsService {
 
       const where: any = {};
 
+      // Apply filters (optimized: build where clause efficiently)
       if (filterDto?.label) {
         where.label = { [Op.iLike]: `%${filterDto.label}%` };
       }
 
       if (filterDto?.type) {
-        where.type = filterDto.type;
+        where.type = { [Op.iLike]: `%${filterDto.type}%` };
+      }
+
+      if (filterDto?.asset_type) {
+        where.asset_type = filterDto.asset_type;
       }
 
       if (filterDto?.model) {
@@ -55,15 +68,18 @@ export class AssetsService {
         where.status = filterDto.status;
       }
 
+      // Apply general search across multiple fields
       if (filterDto?.search) {
         const searchWhere = buildSearchClause(filterDto.search, [
-          'label', 'type', 'model', 'serial_number', 'processor', 'status'
+          'label', 'type', 'model', 'serial_number', 'laptop_processor', 'status', 
+          'phone_number', 'phone_company', 'mobile_imei_1', 'mobile_imei_2'
         ]);
         if (searchWhere) {
           Object.assign(where, searchWhere);
         }
       }
 
+      // Apply date range filter
       if (filterDto?.createdFrom || filterDto?.createdTo) {
         const dateRangeWhere = buildDateRangeClause(
           filterDto.createdFrom,
@@ -75,11 +91,13 @@ export class AssetsService {
         }
       }
 
+      // Build order clause
       const order = buildOrderClause(
         filterDto?.sortBy || 'createdAt',
         filterDto?.sortOrder || 'DESC'
       );
 
+      // Single optimized query
       const { rows: assets, count: total } = await this.assetRepository.findAndCountAll({
         where,
         order: order || [['createdAt', 'DESC']],
@@ -96,19 +114,38 @@ export class AssetsService {
         ...pagination,
       };
     } catch (error) {
-      throw new BadRequestException('Failed to retrieve assets');
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException({
+        message: 'Failed to retrieve assets',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        statusCode: 400,
+      });
     }
   }
 
+  /**
+   * Get an asset by ID
+   * Optimized: Single query
+   */
   async findOne(id: number) {
-    if (!id) {
-      throw new BadRequestException('Invalid asset ID');
+    if (!id || isNaN(id) || id <= 0) {
+      throw new BadRequestException({
+        message: 'Invalid asset ID. Must be a positive number.',
+        error: 'Bad Request',
+        statusCode: 400,
+      });
     }
 
     const asset = await this.assetRepository.findByPk(id);
 
     if (!asset) {
-      throw new NotFoundException(`Asset with ID ${id} not found`);
+      throw new NotFoundException({
+        message: `Asset with ID ${id} not found`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
     }
 
     return {
@@ -117,9 +154,17 @@ export class AssetsService {
     };
   }
 
+  /**
+   * Update an asset
+   * Optimized: Single update query, then fetch
+   */
   async update(id: number, updateAssetDto: UpdateAssetDto) {
-    if (!id) {
-      throw new BadRequestException('Invalid asset ID');
+    if (!id || isNaN(id) || id <= 0) {
+      throw new BadRequestException({
+        message: 'Invalid asset ID. Must be a positive number.',
+        error: 'Bad Request',
+        statusCode: 400,
+      });
     }
 
     const [affectedRows] = await this.assetRepository.update(updateAssetDto, {
@@ -127,12 +172,20 @@ export class AssetsService {
     });
 
     if (affectedRows === 0) {
-      throw new NotFoundException(`Asset with ID ${id} not found`);
+      throw new NotFoundException({
+        message: `Asset with ID ${id} not found`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
     }
 
     const updatedAsset = await this.assetRepository.findByPk(id);
     if (!updatedAsset) {
-      throw new NotFoundException(`Asset with ID ${id} not found`);
+      throw new NotFoundException({
+        message: `Asset with ID ${id} not found`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
     }
 
     return {
@@ -141,9 +194,17 @@ export class AssetsService {
     };
   }
 
+  /**
+   * Soft delete an asset
+   * Optimized: Single update query
+   */
   async remove(id: number) {
-    if (!id) {
-      throw new BadRequestException('Invalid asset ID');
+    if (!id || isNaN(id) || id <= 0) {
+      throw new BadRequestException({
+        message: 'Invalid asset ID. Must be a positive number.',
+        error: 'Bad Request',
+        statusCode: 400,
+      });
     }
 
     const [affectedRows] = await this.assetRepository.update(
@@ -152,7 +213,11 @@ export class AssetsService {
     );
 
     if (affectedRows === 0) {
-      throw new NotFoundException(`Asset with ID ${id} not found`);
+      throw new NotFoundException({
+        message: `Asset with ID ${id} not found`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
     }
 
     return {
@@ -161,4 +226,3 @@ export class AssetsService {
     };
   }
 }
-

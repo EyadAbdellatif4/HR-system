@@ -64,7 +64,6 @@ export enum ErrorMessage {
   JOIN_DATE_REQUIRED = 'Join date is required',
   SOCIAL_INSURANCE_REQUIRED = 'Social insurance status is required',
   MEDICAL_INSURANCE_REQUIRED = 'Medical insurance status is required',
-  TITLE_ID_REQUIRED = 'Title ID is required',
   DEPARTMENT_ID_REQUIRED = 'Department ID is required',
   ROLE_NAME_REQUIRED = 'Role name is required',
   
@@ -79,7 +78,6 @@ export enum ErrorMessage {
   JOIN_DATE_MUST_BE_DATE = 'Join date must be a valid date string',
   SOCIAL_INSURANCE_MUST_BE_BOOLEAN = 'Social insurance must be a boolean value',
   MEDICAL_INSURANCE_MUST_BE_BOOLEAN = 'Medical insurance must be a boolean value',
-  TITLE_ID_MUST_BE_UUID = 'Title ID must be a valid UUID',
   DEPARTMENT_ID_MUST_BE_UUID = 'Department ID must be a valid UUID',
   ROLE_NAME_MUST_BE_STRING = 'Role name must be a string',
   IS_ACTIVE_MUST_BE_BOOLEAN = 'is_active must be a boolean value',
@@ -100,7 +98,6 @@ export enum ErrorMessage {
   // Not Found
   EMPLOYEE_NOT_FOUND = 'Employee not found',
   ROLE_NOT_FOUND = 'Role not found',
-  TITLE_NOT_FOUND = 'Title not found',
   DEPARTMENT_NOT_FOUND = 'Department not found',
   DEFAULT_USER_ROLE_NOT_FOUND = 'Default user role not found',
   DEFAULT_ADMIN_ROLE_NOT_FOUND = 'Default admin role not found',

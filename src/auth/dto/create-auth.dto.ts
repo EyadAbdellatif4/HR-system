@@ -81,12 +81,12 @@ export class RegisterDto {
   medical_insurance: boolean;
 
   @ApiProperty({ 
-    example: 'uuid', 
-    description: 'The ID of the title'
+    example: 'Software Engineer', 
+    description: 'The title of the user'
   })
-  @IsUUID(undefined, { message: ErrorMessage.TITLE_ID_MUST_BE_UUID })
-  @IsNotEmpty({ message: ErrorMessage.TITLE_ID_REQUIRED })
-  title_id: string;
+  @IsString({ message: 'Title must be a string' })
+  @IsNotEmpty({ message: 'Title is required' })
+  title: string;
 
   @ApiProperty({ 
     example: ['uuid1', 'uuid2'], 

@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, IsString, IsBoolean, IsDateString, IsEnum, IsUUID } from 'class-validator';
+import { Type, Transform } from 'class-transformer';
 import { BaseFilterDto } from '../../shared/dto/base-filter.dto';
 
 export class UserFilterDto extends BaseFilterDto {
@@ -22,25 +23,37 @@ export class UserFilterDto extends BaseFilterDto {
   @IsOptional()
   work_location?: 'in-office' | 'hybrid' | 'remote';
 
-  @ApiPropertyOptional({ example: true, description: 'Filter by social insurance' })
-  @IsBoolean()
+  @ApiPropertyOptional({ 
+    example: 'true', 
+    description: 'Filter by social insurance. Accepts: "true" or "false"',
+    type: String
+  })
   @IsOptional()
-  social_insurance?: boolean;
+  @IsString()
+  social_insurance?: string;
 
-  @ApiPropertyOptional({ example: true, description: 'Filter by medical insurance' })
-  @IsBoolean()
+  @ApiPropertyOptional({ 
+    example: 'true', 
+    description: 'Filter by medical insurance. Accepts: "true" or "false"',
+    type: String
+  })
   @IsOptional()
-  medical_insurance?: boolean;
+  @IsString()
+  medical_insurance?: string;
 
-  @ApiPropertyOptional({ example: 'uuid', description: 'Filter by role ID' })
-  @IsUUID()
+  @ApiPropertyOptional({ 
+    example: 'user', 
+    description: 'Filter by role name',
+    enum: ['admin', 'user']
+  })
+  @IsEnum(['admin', 'user'])
   @IsOptional()
-  role_id?: string;
+  role?: 'admin' | 'user';
 
-  @ApiPropertyOptional({ example: 'uuid', description: 'Filter by title ID' })
-  @IsUUID()
+  @ApiPropertyOptional({ example: 'Software Engineer', description: 'Filter by title' })
+  @IsString()
   @IsOptional()
-  title_id?: string;
+  title?: string;
 
   @ApiPropertyOptional({ example: 'uuid', description: 'Filter by department ID' })
   @IsUUID()

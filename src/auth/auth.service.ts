@@ -33,6 +33,10 @@ export class AuthService {
    * @param RegisterDto - The user data
    * @returns The registered user
    */
+  /**
+   * Register a new user
+   * Optimized: Parallel validation queries, single user creation
+   */
   async register(RegisterDto: RegisterDto) {
     const { 
       user_number, 
@@ -44,49 +48,48 @@ export class AuthService {
       join_date, 
       social_insurance, 
       medical_insurance, 
-      title_id, 
+      title, 
       departments 
     } = RegisterDto;
 
-    // Check if username already exists
-    const existingUserByUsername = await this.userRepository.findOne({
-      where: { username },
-      attributes: ['id'],
-    });
+    // Parallel validation queries for better performance
+    const [existingUserByUsername, existingUserByNumber, userRole] = await Promise.all([
+      this.userRepository.findOne({
+        where: { username },
+        attributes: ['id'],
+      }),
+      this.userRepository.findOne({
+        where: { user_number },
+        attributes: ['id'],
+      }),
+      this.roleRepository.findOne({ 
+        where: { name: RoleName.USER },
+        attributes: ['id', 'name'],
+      }),
+    ]);
 
     if (existingUserByUsername) {
-      throw new ConflictException(ErrorMessage.USERNAME_EXISTS);
+      throw new ConflictException({
+        message: ErrorMessage.USERNAME_EXISTS,
+        error: 'Conflict',
+        statusCode: 409,
+      });
     }
-
-    // Check if user_number already exists
-    const existingUserByNumber = await this.userRepository.findOne({
-      where: { user_number },
-      attributes: ['id'],
-    });
 
     if (existingUserByNumber) {
-      throw new ConflictException(ErrorMessage.USER_NUMBER_EXISTS);
+      throw new ConflictException({
+        message: ErrorMessage.USER_NUMBER_EXISTS,
+        error: 'Conflict',
+        statusCode: 409,
+      });
     }
 
-    // Hash password using SHA-256
-    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-
-    // Get default user role
-    const userRole = await this.roleRepository.findOne({ 
-      where: { name: RoleName.USER },
-      attributes: ['id', 'name'],
-    });
     if (!userRole) {
-      throw new ConflictException(ErrorMessage.DEFAULT_USER_ROLE_NOT_FOUND);
-    }
-
-    // Verify title exists if provided
-    if (title_id) {
-      const { Title } = await import('../titles/entities/title.entity');
-      const title = await Title.findByPk(title_id);
-      if (!title) {
-        throw new ConflictException(ErrorMessage.TITLE_NOT_FOUND);
-      }
+      throw new ConflictException({
+        message: ErrorMessage.DEFAULT_USER_ROLE_NOT_FOUND,
+        error: 'Conflict',
+        statusCode: 409,
+      });
     }
 
     // Verify departments exist if provided
@@ -97,9 +100,18 @@ export class AuthService {
         attributes: ['id'],
       });
       if (existingDepartments.length !== departments.length) {
-        throw new ConflictException(ErrorMessage.DEPARTMENT_NOT_FOUND);
+        const foundIds = existingDepartments.map(d => d.id);
+        const missingIds = departments.filter(id => !foundIds.includes(id));
+        throw new ConflictException({
+          message: `Department(s) not found: ${missingIds.join(', ')}`,
+          error: 'Not Found',
+          statusCode: 404,
+        });
       }
     }
+
+    // Hash password using SHA-256
+    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
 
     // Create new user
     const newUser = await this.userRepository.create({
@@ -113,7 +125,7 @@ export class AuthService {
       medical_insurance,
       join_date: new Date(join_date),
       role_id: userRole.id,
-      title_id: title_id || null,
+      title: title || null,
     } as any);
 
     // Associate departments if provided
@@ -122,20 +134,22 @@ export class AuthService {
     }
 
     // Fetch created user with relations
-    const { Title } = await import('../titles/entities/title.entity');
     const { Department } = await import('../departments/entities/department.entity');
     
     const createdUser = await this.userRepository.findByPk(newUser.id, {
       include: [
-        { model: Role, as: 'role' },
-        { model: Title, as: 'title' },
-        { model: Department, as: 'departments' },
+        { model: Role, as: 'role', attributes: ['id', 'name'] },
+        { model: Department, as: 'departments', attributes: ['id', 'name'], through: { attributes: [] } },
       ],
       attributes: { exclude: ['password'] },
     });
 
     if (!createdUser) {
-      throw new ConflictException('Failed to create user');
+      throw new ConflictException({
+        message: 'Failed to create user',
+        error: 'Internal Server Error',
+        statusCode: 500,
+      });
     }
 
     return {
@@ -152,8 +166,7 @@ export class AuthService {
         join_date: createdUser.join_date,
         role_id: createdUser.role_id,
         role_name: createdUser.role?.name,
-        title_id: createdUser.title_id,
-        title_name: createdUser.title?.name,
+        title: createdUser.title,
         departments: createdUser.departments?.map(dept => ({
           id: dept.id,
           name: dept.name,
@@ -182,18 +195,30 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException(ErrorMessage.INVALID_CREDENTIALS);
+      throw new UnauthorizedException({
+        message: ErrorMessage.INVALID_CREDENTIALS,
+        error: 'Unauthorized',
+        statusCode: 401,
+      });
     }
 
     // Verify password
     const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
     if (user.password !== hashedPassword) {
-      throw new UnauthorizedException(ErrorMessage.INVALID_CREDENTIALS);
+      throw new UnauthorizedException({
+        message: ErrorMessage.INVALID_CREDENTIALS,
+        error: 'Unauthorized',
+        statusCode: 401,
+      });
     }
 
     // Check if user is active (not soft deleted)
     if (user.deletedAt) {
-      throw new UnauthorizedException(ErrorMessage.USER_NOT_ACTIVE);
+      throw new UnauthorizedException({
+        message: ErrorMessage.USER_NOT_ACTIVE,
+        error: 'Unauthorized',
+        statusCode: 401,
+      });
     }
 
     // Generate JWT tokens

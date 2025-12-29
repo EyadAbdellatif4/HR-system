@@ -1,7 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsBoolean, IsDateString, IsUUID, IsEnum, IsArray, ValidateNested, IsOptional } from 'class-validator';
-import { Type } from 'class-transformer';
-import { CreatePhoneDto } from './create-user.dto';
+import { IsString, IsBoolean, IsDateString, IsUUID, IsEnum, IsArray, IsOptional } from 'class-validator';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ example: 'EMP001', description: 'User number' })
@@ -58,10 +56,20 @@ export class UpdateUserDto {
   @IsOptional()
   role_id?: string;
 
-  @ApiPropertyOptional({ example: 'uuid', description: 'Title ID' })
-  @IsUUID()
+  @ApiPropertyOptional({ example: 'Software Engineer', description: 'User title' })
+  @IsString()
   @IsOptional()
-  title_id?: string;
+  title?: string;
+
+  @ApiPropertyOptional({ 
+    type: [String], 
+    description: 'Personal phone numbers as JSON array',
+    example: ['0145325235', '425235325453']
+  })
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  personal_phone?: string[];
 
   @ApiPropertyOptional({ 
     type: [String], 

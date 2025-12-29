@@ -11,12 +11,11 @@ import {
 } from 'sequelize-typescript';
 import { DataType } from 'sequelize-typescript';
 import { Role } from '../../role/entities/role.entity';
-import { Title } from '../../titles/entities/title.entity';
-import { Phone } from '../../phones/entities/phone.entity';
 import { Department } from '../../departments/entities/department.entity';
 import { UserDepartment } from '../../shared/database/entities/user-department.entity';
 import { Asset } from '../../assets/entities/asset.entity';
 import { AssetTracking } from '../../asset-tracking/entities/asset-tracking.entity';
+import { Image } from '../../shared/database/entities/image.entity';
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
@@ -124,13 +123,22 @@ export class User extends Model<User> {
   @ApiProperty({ example: 'uuid', description: 'The ID of the role' })
   declare role_id: string;
 
-  @ForeignKey(() => Title)
   @Column({
-    type: DataType.UUID,
+    type: 'VARCHAR(255)',
     allowNull: true,
   })
-  @ApiProperty({ example: 'uuid', description: 'The ID of the title' })
-  declare title_id: string | null;
+  @ApiProperty({ example: 'Software Engineer', description: 'The title of the user' })
+  declare title: string | null;
+
+  @Column({
+    type: DataType.JSONB,
+    allowNull: true,
+  })
+  @ApiProperty({ 
+    example: ['0145325235', '425235325453'], 
+    description: 'Personal phone numbers as JSON array' 
+  })
+  declare personal_phone: string[] | null;
 
   @Column({
     type: DataType.DATE,
@@ -139,17 +147,17 @@ export class User extends Model<User> {
   @ApiProperty({ example: '2025-01-01 12:00:00', description: 'The deleted at date of the user' })
   declare deletedAt: Date;
 
+  @Column({
+    type: DataType.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  })
+  @ApiProperty({ example: true, description: 'Whether the user is active' })
+  declare is_active: boolean;
+
   @BelongsTo(() => Role)
   @ApiProperty({ example: true, description: 'The role of the user' })
   role: Role;
-
-  @BelongsTo(() => Title)
-  @ApiProperty({ example: true, description: 'The title of the user' })
-  title: Title;
-
-  @HasMany(() => Phone)
-  @ApiProperty({ example: true, description: 'The phones of the user' })
-  phones: Phone[];
 
   @BelongsToMany(() => Department, () => UserDepartment, 'user_id', 'department_id')
   @ApiProperty({ example: true, description: 'The departments of the user' })
@@ -162,5 +170,16 @@ export class User extends Model<User> {
   @BelongsToMany(() => Asset, () => AssetTracking, 'user_id', 'asset_id')
   @ApiProperty({ example: true, description: 'The assets assigned to this user' })
   assets: Asset[];
+
+  @HasMany(() => Image, {
+    foreignKey: 'owner_id',
+    constraints: false,
+    scope: {
+      owner_type: 'user',
+    },
+    as: 'images',
+  })
+  @ApiProperty({ example: true, description: 'The images associated with this user' })
+  images: Image[];
 }
 

@@ -39,6 +39,17 @@ export class Asset extends Model<Asset> {
   declare type: string | null;
 
   @Column({
+    type: DataType.ENUM('phone', 'mobile', 'laptop'),
+    allowNull: true,
+  })
+  @ApiProperty({ 
+    example: 'laptop', 
+    description: 'The asset type',
+    enum: ['phone', 'mobile', 'laptop']
+  })
+  declare asset_type: 'phone' | 'mobile' | 'laptop' | null;
+
+  @Column({
     type: 'VARCHAR(255)',
     allowNull: true,
   })
@@ -56,27 +67,6 @@ export class Asset extends Model<Asset> {
     type: 'VARCHAR(255)',
     allowNull: true,
   })
-  @ApiProperty({ example: 'Intel i7-12700H', description: 'The processor of the asset' })
-  declare processor: string | null;
-
-  @Column({
-    type: 'VARCHAR(255)',
-    allowNull: true,
-  })
-  @ApiProperty({ example: '512GB', description: 'The SSD of the asset' })
-  declare ssd: string | null;
-
-  @Column({
-    type: 'VARCHAR(255)',
-    allowNull: true,
-  })
-  @ApiProperty({ example: '1TB', description: 'The HDD of the asset' })
-  declare hdd: string | null;
-
-  @Column({
-    type: 'VARCHAR(255)',
-    allowNull: true,
-  })
   @ApiProperty({ example: '16GB', description: 'The RAM of the asset' })
   declare ram: string | null;
 
@@ -84,15 +74,36 @@ export class Asset extends Model<Asset> {
     type: 'VARCHAR(255)',
     allowNull: true,
   })
-  @ApiProperty({ example: 'NVIDIA RTX 3060', description: 'The graphics card of the asset' })
-  declare graphics_card: string | null;
+  @ApiProperty({ example: 'Intel i7-12700H', description: 'The laptop processor of the asset' })
+  declare laptop_processor: string | null;
 
   @Column({
     type: 'VARCHAR(255)',
     allowNull: true,
   })
-  @ApiProperty({ example: 'Dell 27" 4K', description: 'The monitor of the asset' })
-  declare monitor: string | null;
+  @ApiProperty({ example: '512GB', description: 'The laptop SSD of the asset' })
+  declare laptop_ssd: string | null;
+
+  @Column({
+    type: 'VARCHAR(255)',
+    allowNull: true,
+  })
+  @ApiProperty({ example: '1TB', description: 'The laptop HDD of the asset' })
+  declare laptop_hdd: string | null;
+
+  @Column({
+    type: 'VARCHAR(255)',
+    allowNull: true,
+  })
+  @ApiProperty({ example: 'NVIDIA RTX 3060', description: 'The laptop graphics card of the asset' })
+  declare laptop_graphics_card: string | null;
+
+  @Column({
+    type: 'VARCHAR(255)',
+    allowNull: true,
+  })
+  @ApiProperty({ example: 'Dell 27" 4K', description: 'The laptop monitor of the asset' })
+  declare laptop_monitor: string | null;
 
   @Column({
     type: 'VARCHAR(255)',
@@ -105,29 +116,64 @@ export class Asset extends Model<Asset> {
     type: 'VARCHAR(255)',
     allowNull: true,
   })
-  @ApiProperty({ example: '123456789012345', description: 'The first IMEI of the asset' })
-  declare imei_1: string | null;
+  @ApiProperty({ example: '123456789012345', description: 'The first mobile IMEI of the asset' })
+  declare mobile_imei_1: string | null;
 
   @Column({
     type: 'VARCHAR(255)',
     allowNull: true,
   })
-  @ApiProperty({ example: '123456789012346', description: 'The second IMEI of the asset' })
-  declare imei_2: string | null;
+  @ApiProperty({ example: '123456789012346', description: 'The second mobile IMEI of the asset' })
+  declare mobile_imei_2: string | null;
 
   @Column({
     type: 'VARCHAR(255)',
     allowNull: true,
   })
-  @ApiProperty({ example: '128GB', description: 'The internal memory of the asset' })
-  declare internal_memory: string | null;
+  @ApiProperty({ example: '128GB', description: 'The mobile internal memory of the asset' })
+  declare mobile_internal_memory: string | null;
 
   @Column({
     type: 'VARCHAR(255)',
     allowNull: true,
   })
-  @ApiProperty({ example: '256GB', description: 'The external memory of the asset' })
-  declare external_memory: string | null;
+  @ApiProperty({ example: '256GB', description: 'The mobile external memory of the asset' })
+  declare mobile_external_memory: string | null;
+
+  @Column({
+    type: 'VARCHAR(50)',
+    allowNull: true,
+  })
+  @ApiProperty({ example: '+1234567890', description: 'The phone number of the asset' })
+  declare phone_number: string | null;
+
+  @Column({
+    type: 'VARCHAR(255)',
+    allowNull: true,
+  })
+  @ApiProperty({ example: 'Verizon', description: 'The phone company of the asset' })
+  declare phone_company: string | null;
+
+  @Column({
+    type: 'VARCHAR(255)',
+    allowNull: true,
+  })
+  @ApiProperty({ example: 'Unlimited Plan', description: 'The phone current plan of the asset' })
+  declare phone_current_plan: string | null;
+
+  @Column({
+    type: 'VARCHAR(255)',
+    allowNull: true,
+  })
+  @ApiProperty({ example: 'John Doe', description: 'The phone legal owner of the asset' })
+  declare phone_legal_owner: string | null;
+
+  @Column({
+    type: DataType.TEXT,
+    allowNull: true,
+  })
+  @ApiProperty({ example: 'Company provided phone', description: 'The phone comment of the asset' })
+  declare phone_comment: string | null;
 
   @Column({
     type: DataType.TEXT,

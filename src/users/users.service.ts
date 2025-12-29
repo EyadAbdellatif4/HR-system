@@ -8,79 +8,140 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserFilterDto } from './dto/user-filter.dto';
 import { User } from './entities/user.entity';
-import { Phone } from '../phones/entities/phone.entity';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { buildWhereClause, buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
 import { calculateOffset, getPaginationParams, getPaginationMetadata } from '../shared/utils/pagination.util';
 import { Role } from '../role/entities/role.entity';
-import { Title } from '../titles/entities/title.entity';
 import { Department } from '../departments/entities/department.entity';
+import { Image } from '../shared/database/entities/image.entity';
+import { RoleName } from '../shared/enums';
+import * as crypto from 'crypto';
+
+/**
+ * Common includes for user queries to avoid repetition
+ */
+const getUserIncludes = () => [
+  { model: Role, as: 'role', attributes: ['id', 'name'] },
+  { model: Department, as: 'departments', attributes: ['id', 'name'], through: { attributes: [] } },
+  { 
+    model: Image, 
+    as: 'images', 
+    attributes: ['id', 'image_url', 'owner_type', 'created_at'],
+    required: false,
+  },
+];
 
 @Injectable()
 export class UsersService {
   constructor(
     @InjectModel(User)
     private userRepository: typeof User,
-    @InjectModel(Phone)
-    private phoneRepository: typeof Phone,
+    @InjectModel(Role)
+    private roleRepository: typeof Role,
+    @InjectModel(Image)
+    private imageRepository: typeof Image,
   ) {}
 
   /**
    * Create a new user
+   * Optimized: Parallel validation queries, single user creation, batch department association
    */
   async create(createUserDto: CreateUserDto) {
-    const { phones, department_ids, ...userData } = createUserDto;
+    const { department_ids, role, password, images, ...userData } = createUserDto;
 
-    // Check if user_number already exists
-    const existingUser = await this.userRepository.findOne({
-      where: { user_number: userData.user_number },
-      attributes: ['id'],
-    });
+    // Parallel validation: check user_number, username uniqueness, and get role
+    const [existingUserByNumber, existingUserByUsername, userRole] = await Promise.all([
+      this.userRepository.findOne({
+        where: { user_number: userData.user_number },
+        attributes: ['id'],
+      }),
+      this.userRepository.findOne({
+        where: { username: userData.username },
+        attributes: ['id'],
+      }),
+      this.roleRepository.findOne({
+        where: { name: role },
+        attributes: ['id', 'name'],
+      }),
+    ]);
 
-    if (existingUser) {
-      throw new ConflictException('User with this user number already exists');
+    if (existingUserByNumber) {
+      throw new ConflictException({
+        message: 'User with this user number already exists',
+        error: 'Conflict',
+        statusCode: 409,
+      });
     }
+
+    if (existingUserByUsername) {
+      throw new ConflictException({
+        message: 'User with this username already exists',
+        error: 'Conflict',
+        statusCode: 409,
+      });
+    }
+
+    if (!userRole) {
+      throw new NotFoundException({
+        message: `Role '${role}' not found. Available roles: admin, user`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
+    }
+
+    // Verify departments exist if provided
+    if (department_ids && department_ids.length > 0) {
+      const existingDepartments = await Department.findAll({
+        where: { id: department_ids },
+        attributes: ['id'],
+      });
+      if (existingDepartments.length !== department_ids.length) {
+        const foundIds = existingDepartments.map(d => d.id);
+        const missingIds = department_ids.filter(id => !foundIds.includes(id));
+        throw new NotFoundException({
+          message: `Department(s) not found: ${missingIds.join(', ')}`,
+          error: 'Not Found',
+          statusCode: 404,
+        });
+      }
+    }
+
+    // Hash password using SHA-256 (same as auth service)
+    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
 
     // Convert date strings to Date objects
     const userDataWithDates = {
       ...userData,
+      password: hashedPassword,
+      role_id: userRole.id,
       join_date: userData.join_date ? new Date(userData.join_date) : undefined,
       contract_date: userData.contract_date ? new Date(userData.contract_date) : undefined,
       exit_date: userData.exit_date ? new Date(userData.exit_date) : undefined,
     };
 
-    // Create user with phones and departments
+    // Create user
     const user = await this.userRepository.create(userDataWithDates as any);
 
-    // Create phones if provided
-    if (phones && phones.length > 0) {
-      await this.phoneRepository.bulkCreate(
-        phones.map(phone => ({
-          number: phone.number,
-          company: phone.company,
-          current_plan: phone.current_plan,
-          legal_owner: phone.legal_owner,
-          comment: phone.comment,
-          user_id: user.id,
-          is_active: phone.is_active ?? true,
-        })) as any
-      );
-    }
-
-    // Associate departments if provided
+    // Associate departments if provided (batch operation)
     if (department_ids && department_ids.length > 0) {
       await user.$set('departments', department_ids);
     }
 
-    // Reload user with relations
+    // Create images if provided
+    if (images && images.length > 0) {
+      const imageRecords = images.map(imageUrl => ({
+        owner_id: user.id, // Use UUID string directly
+        owner_type: 'user' as const,
+        image_url: imageUrl,
+      })) as any;
+      await this.imageRepository.bulkCreate(imageRecords);
+    }
+
+    // Reload user with relations in a single query (exclude password from response)
     const createdUser = await this.userRepository.findByPk(user.id, {
-      include: [
-        { model: Role, as: 'role' },
-        { model: Title, as: 'title' },
-        { model: Phone, as: 'phones' },
-        { model: Department, as: 'departments' },
-      ],
+      include: getUserIncludes(),
+      attributes: { exclude: ['password'] },
     });
 
     return {
@@ -91,6 +152,7 @@ export class UsersService {
 
   /**
    * Get all users with optional filtering
+   * Optimized: Single query with proper includes, distinct count
    */
   async findAll(filterDto?: UserFilterDto) {
     try {
@@ -99,7 +161,29 @@ export class UsersService {
 
       const where: any = {};
 
-      // Apply filters
+      // Get role_id if role filter is provided (optimized: single query upfront)
+      let roleIdForFilter: string | null = null;
+      if (filterDto?.role) {
+        const role = await this.roleRepository.findOne({
+          where: { name: filterDto.role },
+          attributes: ['id'],
+        });
+        if (!role) {
+          // If role doesn't exist, return empty result immediately
+          return {
+            message: 'Users retrieved successfully',
+            users: [],
+            count: 0,
+            total: 0,
+            page: 1,
+            limit,
+            totalPages: 0,
+          };
+        }
+        roleIdForFilter = role.id;
+      }
+
+      // Apply filters (optimized: build where clause efficiently)
       if (filterDto?.user_number) {
         where.user_number = { [Op.iLike]: `%${filterDto.user_number}%` };
       }
@@ -112,25 +196,27 @@ export class UsersService {
         where.work_location = filterDto.work_location;
       }
 
-      if (filterDto?.social_insurance !== undefined) {
-        where.social_insurance = filterDto.social_insurance;
+      // Boolean filters - simple string to boolean conversion
+      if (filterDto?.social_insurance) {
+        where.social_insurance = filterDto.social_insurance === 'true';
       }
 
-      if (filterDto?.medical_insurance !== undefined) {
-        where.medical_insurance = filterDto.medical_insurance;
+      if (filterDto?.medical_insurance) {
+        where.medical_insurance = filterDto.medical_insurance === 'true';
       }
 
-      if (filterDto?.role_id) {
-        where.role_id = filterDto.role_id;
+      // Role filter - use pre-fetched role_id
+      if (roleIdForFilter) {
+        where.role_id = roleIdForFilter;
       }
 
-      if (filterDto?.title_id) {
-        where.title_id = filterDto.title_id;
+      if (filterDto?.title) {
+        where.title = { [Op.iLike]: `%${filterDto.title}%` };
       }
 
       // Apply general search
       if (filterDto?.search) {
-        const searchWhere = buildSearchClause(filterDto.search, ['user_number', 'name', 'address']);
+        const searchWhere = buildSearchClause(filterDto.search, ['user_number', 'name', 'address', 'title']);
         if (searchWhere) {
           Object.assign(where, searchWhere);
         }
@@ -155,30 +241,26 @@ export class UsersService {
       );
 
       // Department filter (requires join)
-      const include: any[] = [
-        { model: Role, as: 'role' },
-        { model: Title, as: 'title' },
-        { model: Phone, as: 'phones' },
-        { model: Department, as: 'departments' },
-      ];
-
+      let include: any[] = getUserIncludes();
       if (filterDto?.department_id) {
-        include.push({
-          model: Department,
-          as: 'departments',
-          where: { id: filterDto.department_id },
-          required: true,
-        });
+        include = [
+          { model: Role, as: 'role', attributes: ['id', 'name'] },
+          {
+            model: Department,
+            as: 'departments',
+            where: { id: filterDto.department_id },
+            required: true,
+            attributes: ['id', 'name'],
+            through: { attributes: [] },
+          },
+        ];
       }
 
+      // Single optimized query with all includes (exclude password from response)
       const { rows: users, count: total } = await this.userRepository.findAndCountAll({
         where,
-        include: include.length > 4 ? include : [
-          { model: Role, as: 'role' },
-          { model: Title, as: 'title' },
-          { model: Phone, as: 'phones' },
-          { model: Department, as: 'departments' },
-        ],
+        include,
+        attributes: { exclude: ['password'] },
         order: order || [['createdAt', 'DESC']],
         limit,
         offset,
@@ -194,29 +276,41 @@ export class UsersService {
         ...pagination,
       };
     } catch (error) {
-      throw new BadRequestException('Failed to retrieve users');
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException({
+        message: 'Failed to retrieve users',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        statusCode: 400,
+      });
     }
   }
 
   /**
    * Get a user by ID
+   * Optimized: Single query with all relations
    */
   async findOne(id: string) {
-    if (!id) {
-      throw new BadRequestException('Invalid user ID');
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      throw new BadRequestException({
+        message: 'Invalid user ID format. Expected UUID format.',
+        error: 'Bad Request',
+        statusCode: 400,
+      });
     }
 
     const user = await this.userRepository.findByPk(id, {
-      include: [
-        { model: Role, as: 'role' },
-        { model: Title, as: 'title' },
-        { model: Phone, as: 'phones' },
-        { model: Department, as: 'departments' },
-      ],
+      include: getUserIncludes(),
+      attributes: { exclude: ['password'] },
     });
 
     if (!user) {
-      throw new NotFoundException(`User with ID ${id} not found`);
+      throw new NotFoundException({
+        message: `User with ID ${id} not found`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
     }
 
     return {
@@ -227,33 +321,45 @@ export class UsersService {
 
   /**
    * Update a user
+   * Optimized: Check existence and conflict in parallel, single update query
    */
   async update(id: string, updateUserDto: UpdateUserDto) {
-    if (!id) {
-      throw new BadRequestException('Invalid user ID');
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      throw new BadRequestException({
+        message: 'Invalid user ID format. Expected UUID format.',
+        error: 'Bad Request',
+        statusCode: 400,
+      });
     }
 
     const { department_ids, ...updateData } = updateUserDto;
 
-    // Check if user exists
-    const user = await this.userRepository.findByPk(id);
-    if (!user) {
-      throw new NotFoundException(`User with ID ${id} not found`);
-    }
-
-    // Check for user_number conflict if updating
-    if (updateData.user_number) {
-      const conflictUser = await this.userRepository.findOne({
+    // Check if user exists and check for conflicts in parallel
+    const [user, conflictUser] = await Promise.all([
+      this.userRepository.findByPk(id, { attributes: ['id'] }),
+      updateData.user_number ? this.userRepository.findOne({
         where: {
           id: { [Op.ne]: id },
           user_number: updateData.user_number,
         },
         attributes: ['id'],
-      });
+      }) : Promise.resolve(null),
+    ]);
 
-      if (conflictUser) {
-        throw new ConflictException('User with this user number already exists');
-      }
+    if (!user) {
+      throw new NotFoundException({
+        message: `User with ID ${id} not found`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
+    }
+
+    if (conflictUser) {
+      throw new ConflictException({
+        message: 'User with this user number already exists',
+        error: 'Conflict',
+        statusCode: 409,
+      });
     }
 
     // Convert date strings to Date objects if present
@@ -268,24 +374,16 @@ export class UsersService {
       updateDataWithDates.exit_date = new Date(updateData.exit_date);
     }
 
-    // Update user
-    await this.userRepository.update(updateDataWithDates, {
-      where: { id },
-    });
+    // Update user and departments in parallel
+    await Promise.all([
+      this.userRepository.update(updateDataWithDates, { where: { id } }),
+      department_ids !== undefined ? user.$set('departments', department_ids) : Promise.resolve(),
+    ]);
 
-    // Update departments if provided
-    if (department_ids !== undefined) {
-      await user.$set('departments', department_ids);
-    }
-
-    // Fetch updated user
+    // Fetch updated user with relations (exclude password from response)
     const updatedUser = await this.userRepository.findByPk(id, {
-      include: [
-        { model: Role, as: 'role' },
-        { model: Title, as: 'title' },
-        { model: Phone, as: 'phones' },
-        { model: Department, as: 'departments' },
-      ],
+      include: getUserIncludes(),
+      attributes: { exclude: ['password'] },
     });
 
     return {
@@ -296,19 +394,28 @@ export class UsersService {
 
   /**
    * Soft delete a user
+   * Optimized: Single update query
    */
   async remove(id: string) {
-    if (!id) {
-      throw new BadRequestException('Invalid user ID');
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+      throw new BadRequestException({
+        message: 'Invalid user ID format. Expected UUID format.',
+        error: 'Bad Request',
+        statusCode: 400,
+      });
     }
 
     const [affectedRows] = await this.userRepository.update(
-      { deletedAt: new Date() },
+      { deletedAt: new Date(), is_active: false },
       { where: { id } }
     );
 
     if (affectedRows === 0) {
-      throw new NotFoundException(`User with ID ${id} not found`);
+      throw new NotFoundException({
+        message: `User with ID ${id} not found`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
     }
 
     return {
@@ -317,4 +424,3 @@ export class UsersService {
     };
   }
 }
-

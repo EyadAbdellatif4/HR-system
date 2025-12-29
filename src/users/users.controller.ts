@@ -32,11 +32,12 @@ export class UsersController {
   @Post()
   @ApiOperation({ 
     summary: 'Create a new user',
-    description: 'Creates a new user with the provided information. Can include phones and departments.'
+    description: 'Creates a new user with username, password, and other information. Username must be a valid email and unique. Password will be hashed before storage. Role can be "admin" or "user". Can include personal phone numbers and departments.'
   })
   @ApiResponse({ status: 201, description: 'User created successfully' })
-  @ApiResponse({ status: 400, description: 'Validation error' })
-  @ApiResponse({ status: 409, description: 'User number already exists' })
+  @ApiResponse({ status: 400, description: 'Validation error - Invalid input data' })
+  @ApiResponse({ status: 404, description: 'Role or department not found' })
+  @ApiResponse({ status: 409, description: 'User number or username already exists' })
   @HttpCode(HttpStatus.CREATED)
   create(@Body(ValidationPipe) createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);
@@ -45,9 +46,10 @@ export class UsersController {
   @Get()
   @ApiOperation({ 
     summary: 'Get all users',
-    description: 'Retrieves all users with optional filtering and pagination.'
+    description: 'Retrieves all users with optional filtering and pagination. Supports filtering by user number, name, work location, social/medical insurance (boolean), role (admin/user), title, department, and join date range.'
   })
   @ApiResponse({ status: 200, description: 'Users retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Validation error - Invalid filter parameters' })
   findAll(@Query(ValidationPipe) filterDto: UserFilterDto) {
     return this.usersService.findAll(filterDto);
   }

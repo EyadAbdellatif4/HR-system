@@ -8,8 +8,6 @@ import * as fs from 'fs';
 import { APP_GUARD } from '@nestjs/core';
 import { UsersModule } from './users/users.module';
 import { RoleModule } from './role/role.module';
-import { TitlesModule } from './titles/titles.module';
-import { PhonesModule } from './phones/phones.module';
 import { DepartmentsModule } from './departments/departments.module';
 import { AssetsModule } from './assets/assets.module';
 import { AssetTrackingModule } from './asset-tracking/asset-tracking.module';
@@ -81,8 +79,6 @@ import databaseModels from './shared/database/databaseModel';
     AuthModule,
     UsersModule,
     RoleModule,
-    TitlesModule,
-    PhonesModule,
     DepartmentsModule,
     AssetsModule,
     AssetTrackingModule,
