@@ -10,9 +10,29 @@ import { Asset } from './entities/asset.entity';
 import { Attachment } from '../shared/database/entities/attachment.entity';
 import { AttachmentUploadService } from '../shared/storage/attachment-upload.service';
 import { InjectModel } from '@nestjs/sequelize';
-import { Op } from 'sequelize';
+import { Op, Sequelize } from 'sequelize';
 import { buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
 import { calculateOffset, getPaginationParams, getPaginationMetadata } from '../shared/utils/pagination.util';
+
+/**
+ * Fetch attachments for an asset (separate query for polymorphic relationship)
+ * Time Complexity: O(1) - indexed lookup on entity_id and entity_type
+ */
+async function getAssetAttachments(assetId: string): Promise<Attachment[]> {
+  return await Attachment.findAll({
+    where: {
+      entity_id: assetId, // entity_id is VARCHAR, assetId is UUID string - PostgreSQL handles conversion
+      entity_type: 'assets',
+      is_active: true,
+      [Op.and]: [
+        Sequelize.literal('deleted_at IS NULL'),
+      ],
+    } as any,
+    attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
+    order: [['created_at', 'DESC']],
+    paranoid: false, // We're handling deleted_at manually
+  });
+}
 
 @Injectable()
 export class AssetsService {
@@ -34,23 +54,23 @@ export class AssetsService {
       await this.attachmentUploadService.uploadAndSaveAttachments(files, asset.id, 'assets');
     }
 
-    // Reload asset with attachments
+    // Reload asset
     const createdAsset = await this.assetRepository.findOne({
       where: { id: asset.id, is_active: true },
-      include: [
-        { 
-          model: Attachment, 
-          as: 'attachments',
-          where: { is_active: true },
-          attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
-          required: false,
-        },
-      ],
     });
+
+    // Fetch attachments separately (polymorphic relationship): O(1)
+    const attachments = await getAssetAttachments(asset.id);
+    
+    // Convert asset to plain object and attach attachments for proper serialization
+    const assetResponse = createdAsset ? createdAsset.toJSON() : null;
+    if (assetResponse) {
+      assetResponse.attachments = attachments.map(att => att.toJSON());
+    }
 
     return {
       message: 'Asset created successfully',
-      asset: createdAsset,
+      asset: assetResponse,
     };
   }
 
@@ -122,23 +142,47 @@ export class AssetsService {
       // Always filter by is_active = true
       where.is_active = true;
 
-      // Single optimized query with attachments
+      // Single optimized query
       const { rows: assets, count: total } = await this.assetRepository.findAndCountAll({
         where,
-        include: [
-          { 
-            model: Attachment, 
-            as: 'attachments', 
-            where: { is_active: true },
-            attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
-            required: false,
-          },
-        ],
         order: order || [['createdAt', 'DESC']],
         limit,
         offset,
-        distinct: true, // Important for count with joins
       });
+
+      // Fetch attachments for all assets in parallel: O(n) where n = number of assets
+      if (assets.length > 0) {
+        const assetIds = assets.map(a => a.id);
+        const allAttachments = await Attachment.findAll({
+          where: {
+            entity_id: { [Op.in]: assetIds },
+            entity_type: 'assets',
+            is_active: true,
+            [Op.and]: [
+              Sequelize.literal('deleted_at IS NULL'),
+            ],
+          } as any,
+          attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at', 'entity_id'],
+          order: [['created_at', 'DESC']],
+          paranoid: false, // We're handling deleted_at manually
+        });
+
+        // Group attachments by asset_id
+        const attachmentsByAssetId = new Map<string, Attachment[]>();
+        allAttachments.forEach(attachment => {
+          const assetId = attachment.entity_id;
+          if (!attachmentsByAssetId.has(assetId)) {
+            attachmentsByAssetId.set(assetId, []);
+          }
+          attachmentsByAssetId.get(assetId)!.push(attachment);
+        });
+
+        // Attach attachments to each asset (convert to plain objects for proper serialization)
+        assets.forEach(asset => {
+          const assetAttachments = attachmentsByAssetId.get(asset.id) || [];
+          (asset as any).attachments = assetAttachments.map(att => att.toJSON());
+        });
+      }
 
       const pagination = getPaginationMetadata(total, page, limit);
 
@@ -175,15 +219,6 @@ export class AssetsService {
 
     const asset = await this.assetRepository.findOne({
       where: { id, is_active: true },
-      include: [
-        { 
-          model: Attachment, 
-          as: 'attachments',
-          where: { is_active: true },
-          attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
-          required: false,
-        },
-      ],
     });
 
     if (!asset) {
@@ -194,9 +229,16 @@ export class AssetsService {
       });
     }
 
+    // Fetch attachments separately (polymorphic relationship): O(1)
+    const attachments = await getAssetAttachments(id);
+    
+    // Convert to plain object and attach attachments for proper serialization
+    const assetResponse = asset.toJSON();
+    assetResponse.attachments = attachments.map(att => att.toJSON());
+
     return {
       message: 'Asset retrieved successfully',
-      asset,
+      asset: assetResponse,
     };
   }
 

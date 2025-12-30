@@ -1,37 +1,37 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { IsString, IsOptional, IsEnum, IsNotEmpty } from 'class-validator';
 import { AssetType } from '../enums';
 
 export class CreateAssetDto {
-  @ApiPropertyOptional({ example: 'Laptop-001', description: 'The label of the asset' })
+  @ApiProperty({ example: 'Laptop-001', description: 'The label of the asset' })
   @IsString()
-  @IsOptional()
-  label?: string;
+  @IsNotEmpty()
+  label: string;
 
-  @ApiPropertyOptional({ example: 'Laptop', description: 'The type of the asset' })
+  @ApiProperty({ example: 'Laptop', description: 'The type of the asset' })
   @IsString()
-  @IsOptional()
-  type?: string;
+  @IsNotEmpty()
+  type: string;
 
-  @ApiPropertyOptional({ enum: AssetType })
+  @ApiProperty({ enum: AssetType })
   @IsEnum(AssetType)
-  @IsOptional()
-  asset_type?: AssetType;
+  @IsNotEmpty()
+  asset_type: AssetType;
 
-  @ApiPropertyOptional({ example: 'Dell XPS 15', description: 'The model of the asset' })
+  @ApiProperty({ example: 'Dell XPS 15', description: 'The model of the asset' })
   @IsString()
-  @IsOptional()
-  model?: string;
+  @IsNotEmpty()
+  model: string;
 
-  @ApiPropertyOptional({ example: 'SN123456789', description: 'The serial number of the asset' })
+  @ApiProperty({ example: 'SN123456789', description: 'The serial number of the asset' })
   @IsString()
-  @IsOptional()
-  serial_number?: string;
+  @IsNotEmpty()
+  serial_number: string;
 
-  @ApiPropertyOptional({ example: '16GB', description: 'The RAM of the asset' })
+  @ApiProperty({ example: '16GB', description: 'The RAM of the asset' })
   @IsString()
-  @IsOptional()
-  ram?: string;
+  @IsNotEmpty()
+  ram: string;
 
   // Laptop-specific fields
   @ApiPropertyOptional({ example: 'Intel i7-12700H', description: 'The laptop processor of the asset' })
@@ -106,10 +106,10 @@ export class CreateAssetDto {
   @IsOptional()
   phone_comment?: string;
 
-  @ApiPropertyOptional({ example: 'Active', description: 'The status of the asset' })
+  @ApiProperty({ example: 'Active', description: 'The status of the asset' })
   @IsString()
-  @IsOptional()
-  status?: string;
+  @IsNotEmpty()
+  status: string;
 
   @ApiPropertyOptional({ example: 'Additional details about the asset', description: 'Additional details' })
   @IsString()
