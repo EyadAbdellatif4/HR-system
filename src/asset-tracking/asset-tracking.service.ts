@@ -157,22 +157,56 @@ export class AssetTrackingService {
       throw new BadRequestException('Invalid asset tracking ID');
     }
 
-    const updateData: any = { ...updateAssetTrackingDto };
-    if (updateAssetTrackingDto.assigned_at) {
-      updateData.assigned_at = new Date(updateAssetTrackingDto.assigned_at);
-    }
-    if (updateAssetTrackingDto.removed_at) {
-      updateData.removed_at = new Date(updateAssetTrackingDto.removed_at);
-    }
-
-    const [affectedRows] = await this.assetTrackingRepository.update(updateData, {
+    // Check if asset tracking exists
+    const assetTracking = await this.assetTrackingRepository.findOne({
       where: { id, is_active: true },
+      attributes: ['id'],
     });
 
-    if (affectedRows === 0) {
+    if (!assetTracking) {
       throw new NotFoundException(`Asset tracking with ID ${id} not found`);
     }
 
+    // Prepare update data
+    const updateData: any = {};
+    
+    // Only include fields that are provided
+    if (updateAssetTrackingDto.asset_id !== undefined) {
+      updateData.asset_id = updateAssetTrackingDto.asset_id;
+    }
+    if (updateAssetTrackingDto.user_id !== undefined) {
+      updateData.user_id = updateAssetTrackingDto.user_id;
+    }
+    
+    // Handle assigned_at - convert string to Date if provided, or set to null if explicitly null
+    if (updateAssetTrackingDto.assigned_at !== undefined) {
+      if (updateAssetTrackingDto.assigned_at === null || updateAssetTrackingDto.assigned_at === '') {
+        updateData.assigned_at = null;
+      } else {
+        updateData.assigned_at = new Date(updateAssetTrackingDto.assigned_at);
+      }
+    }
+    
+    // Handle removed_at - convert string to Date if provided, or set to null if explicitly null/empty
+    if (updateAssetTrackingDto.removed_at !== undefined) {
+      if (updateAssetTrackingDto.removed_at === null || updateAssetTrackingDto.removed_at === '') {
+        updateData.removed_at = null;
+      } else {
+        updateData.removed_at = new Date(updateAssetTrackingDto.removed_at);
+      }
+    }
+
+    // Only update if there's data to update
+    if (Object.keys(updateData).length === 0) {
+      throw new BadRequestException('No fields provided to update');
+    }
+
+    // Update the record
+    await this.assetTrackingRepository.update(updateData, {
+      where: { id, is_active: true },
+    });
+
+    // Fetch updated tracking with relations
     const updatedTracking = await this.assetTrackingRepository.findOne({
       where: { id, is_active: true },
       include: [
@@ -188,6 +222,10 @@ export class AssetTrackingService {
         },
       ],
     });
+
+    if (!updatedTracking) {
+      throw new NotFoundException(`Asset tracking with ID ${id} not found`);
+    }
 
     return {
       message: 'Asset tracking updated successfully',

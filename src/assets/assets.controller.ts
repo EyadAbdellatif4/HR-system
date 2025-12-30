@@ -13,6 +13,7 @@ import {
   Query,
   UseInterceptors,
   UploadedFiles,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { AssetsService } from './assets.service';
@@ -61,25 +62,44 @@ export class AssetsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get an asset by ID' })
   @ApiResponse({ status: 200, description: 'Asset retrieved successfully' })
-  @ApiParam({ name: 'id', type: 'string', description: 'The asset UUID' })
-  findOne(@Param('id') id: string) {
+  @ApiResponse({ status: 400, description: 'Invalid UUID format' })
+  @ApiResponse({ status: 404, description: 'Asset not found' })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The asset UUID' })
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.assetsService.findOne(id);
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update an asset' })
+  @UseInterceptors(FilesInterceptor('images', 10, multerConfig))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ 
+    summary: 'Update an asset',
+    description: 'Updates an existing asset with new information. Can include attachment files (up to 10 files) for updating asset images.'
+  })
+  @ApiBody({ type: UpdateAssetDto })
   @ApiResponse({ status: 200, description: 'Asset updated successfully' })
-  @ApiParam({ name: 'id', type: 'string', description: 'The asset UUID' })
-  update(@Param('id') id: string, @Body(ValidationPipe) updateAssetDto: UpdateAssetDto) {
-    return this.assetsService.update(id, updateAssetDto);
+  @ApiResponse({ status: 400, description: 'Invalid UUID format' })
+  @ApiResponse({ status: 404, description: 'Asset not found' })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The asset UUID' })
+  update(
+    @Param('id', ParseUUIDPipe) id: string, 
+    @Body(ValidationPipe) updateAssetDto: UpdateAssetDto,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    return this.assetsService.update(id, updateAssetDto, files);
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete an asset' })
+  @ApiOperation({ 
+    summary: 'Delete an asset',
+    description: 'Soft deletes an asset by setting deletedAt timestamp and is_active to false.'
+  })
   @ApiResponse({ status: 200, description: 'Asset deleted successfully' })
-  @ApiParam({ name: 'id', type: 'string', description: 'The asset UUID' })
+  @ApiResponse({ status: 400, description: 'Invalid UUID format' })
+  @ApiResponse({ status: 404, description: 'Asset not found' })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The asset UUID' })
   @HttpCode(HttpStatus.OK)
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.assetsService.remove(id);
   }
 }

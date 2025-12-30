@@ -11,6 +11,7 @@ import {
   HttpStatus,
   ValidationPipe,
   Query,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { AssetTrackingService } from './asset-tracking.service';
 import { CreateAssetTrackingDto } from './dto/create-asset-tracking.dto';
@@ -47,25 +48,34 @@ export class AssetTrackingController {
   @Get(':id')
   @ApiOperation({ summary: 'Get an asset tracking record by ID' })
   @ApiResponse({ status: 200, description: 'Asset tracking retrieved successfully' })
-  @ApiParam({ name: 'id', type: 'string' })
-  findOne(@Param('id') id: string) {
+  @ApiResponse({ status: 400, description: 'Invalid UUID format' })
+  @ApiResponse({ status: 404, description: 'Asset tracking not found' })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The asset tracking UUID' })
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.assetTrackingService.findOne(id);
   }
 
   @Patch(':id')
   @ApiOperation({ summary: 'Update an asset tracking record' })
   @ApiResponse({ status: 200, description: 'Asset tracking updated successfully' })
-  @ApiParam({ name: 'id', type: 'string' })
-  update(@Param('id') id: string, @Body(ValidationPipe) updateAssetTrackingDto: UpdateAssetTrackingDto) {
+  @ApiResponse({ status: 400, description: 'Invalid UUID format or no fields to update' })
+  @ApiResponse({ status: 404, description: 'Asset tracking not found' })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The asset tracking UUID' })
+  update(
+    @Param('id', ParseUUIDPipe) id: string, 
+    @Body(ValidationPipe) updateAssetTrackingDto: UpdateAssetTrackingDto
+  ) {
     return this.assetTrackingService.update(id, updateAssetTrackingDto);
   }
 
   @Delete(':id')
   @ApiOperation({ summary: 'Delete an asset tracking record' })
   @ApiResponse({ status: 200, description: 'Asset tracking deleted successfully' })
-  @ApiParam({ name: 'id', type: 'string' })
+  @ApiResponse({ status: 400, description: 'Invalid UUID format' })
+  @ApiResponse({ status: 404, description: 'Asset tracking not found' })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The asset tracking UUID' })
   @HttpCode(HttpStatus.OK)
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.assetTrackingService.remove(id);
   }
 }

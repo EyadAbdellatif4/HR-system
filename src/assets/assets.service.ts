@@ -9,8 +9,8 @@ import { AssetFilterDto } from './dto/asset-filter.dto';
 import { Asset } from './entities/asset.entity';
 import { Attachment } from '../shared/database/entities/attachment.entity';
 import { AttachmentUploadService } from '../shared/storage/attachment-upload.service';
-import { InjectModel } from '@nestjs/sequelize';
-import { Op, Sequelize } from 'sequelize';
+import { InjectModel, InjectConnection } from '@nestjs/sequelize';
+import { Op, Sequelize, Transaction } from 'sequelize';
 import { buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
 import { calculateOffset, getPaginationParams, getPaginationMetadata } from '../shared/utils/pagination.util';
 
@@ -39,6 +39,8 @@ export class AssetsService {
   constructor(
     @InjectModel(Asset)
     private assetRepository: typeof Asset,
+    @InjectConnection()
+    private sequelize: Sequelize,
     private attachmentUploadService: AttachmentUploadService,
   ) {}
 
@@ -244,22 +246,17 @@ export class AssetsService {
 
   /**
    * Update an asset
-   * Optimized: Single update query, then fetch
+   * Optimized: Check existence, single update query, soft delete old attachments
+   * Note: UUID validation is handled by ParseUUIDPipe in controller
    */
-  async update(id: string, updateAssetDto: UpdateAssetDto) {
-    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      throw new BadRequestException({
-        message: 'Invalid asset ID format. Expected UUID format.',
-        error: 'Bad Request',
-        statusCode: 400,
-      });
-    }
-
-    const [affectedRows] = await this.assetRepository.update(updateAssetDto, {
+  async update(id: string, updateAssetDto: UpdateAssetDto, files?: Express.Multer.File[]) {
+    // Check if asset exists
+    const asset = await this.assetRepository.findOne({
       where: { id, is_active: true },
+      attributes: ['id'],
     });
 
-    if (affectedRows === 0) {
+    if (!asset) {
       throw new NotFoundException({
         message: `Asset with ID ${id} not found`,
         error: 'Not Found',
@@ -267,6 +264,62 @@ export class AssetsService {
       });
     }
 
+    // Start transaction
+    const transaction = await this.sequelize.transaction();
+
+    try {
+      // Update asset within transaction
+      await this.assetRepository.update(updateAssetDto, { 
+        where: { id, is_active: true }, 
+        transaction 
+      });
+
+      // Soft delete old attachments if new files are being uploaded
+      if (files && files.length > 0) {
+        await Attachment.update(
+          { deleted_at: new Date(), is_active: false },
+          {
+            where: {
+              entity_id: id,
+              entity_type: 'assets',
+              is_active: true,
+              [Op.and]: [
+                Sequelize.literal('deleted_at IS NULL'),
+              ],
+            } as any,
+            transaction,
+            paranoid: false, // We're handling deleted_at manually
+          }
+        );
+      }
+
+      // Commit transaction
+      await transaction.commit();
+
+      // File uploads (non-blocking, outside transaction): O(m) where m = number of files
+      if (files && files.length > 0) {
+        try {
+          const savedAttachments = await this.attachmentUploadService.uploadAndSaveAttachments(files, id, 'assets');
+          if (!savedAttachments || savedAttachments.length === 0) {
+            console.error('Warning: Files uploaded but no attachment records created');
+          }
+        } catch (fileError) {
+          console.error('File upload/attachment save failed:', fileError);
+          // Don't throw - asset is already updated, just log the error
+        }
+      }
+    } catch (error) {
+      // Rollback transaction on any error
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        // Transaction might already be rolled back, ignore
+      }
+      // Re-throw the error so NestJS can handle it
+      throw error;
+    }
+
+    // Fetch updated asset
     const updatedAsset = await this.assetRepository.findOne({
       where: { id, is_active: true },
     });
@@ -278,31 +331,32 @@ export class AssetsService {
       });
     }
 
+    // Fetch attachments separately (polymorphic relationship): O(1)
+    const attachments = await getAssetAttachments(id);
+    
+    // Convert to plain object and attach attachments for proper serialization
+    const assetResponse = updatedAsset.toJSON();
+    assetResponse.attachments = attachments.map(att => att.toJSON());
+
     return {
       message: 'Asset updated successfully',
-      asset: updatedAsset,
+      asset: assetResponse,
     };
   }
 
   /**
    * Soft delete an asset
-   * Optimized: Single update query
+   * Optimized: Single update query, also soft deletes attachments
+   * Note: UUID validation is handled by ParseUUIDPipe in controller
    */
   async remove(id: string) {
-    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      throw new BadRequestException({
-        message: 'Invalid asset ID format. Expected UUID format.',
-        error: 'Bad Request',
-        statusCode: 400,
-      });
-    }
+    // Check if asset exists
+    const asset = await this.assetRepository.findOne({
+      where: { id, is_active: true },
+      attributes: ['id'],
+    });
 
-    const [affectedRows] = await this.assetRepository.update(
-      { deletedAt: new Date(), is_active: false },
-      { where: { id, is_active: true } }
-    );
-
-    if (affectedRows === 0) {
+    if (!asset) {
       throw new NotFoundException({
         message: `Asset with ID ${id} not found`,
         error: 'Not Found',
@@ -310,9 +364,48 @@ export class AssetsService {
       });
     }
 
-    return {
-      message: 'Asset deleted successfully',
-      assetId: id,
-    };
+    // Start transaction for atomicity
+    const transaction = await this.sequelize.transaction();
+
+    try {
+      // Soft delete asset - set both deletedAt and is_active
+      await this.assetRepository.update(
+        { deletedAt: new Date(), is_active: false },
+        { where: { id, is_active: true }, transaction }
+      );
+
+      // Soft delete all attachments related to this asset
+      await Attachment.update(
+        { deleted_at: new Date(), is_active: false },
+        {
+          where: {
+            entity_id: id,
+            entity_type: 'assets',
+            is_active: true,
+            [Op.and]: [
+              Sequelize.literal('deleted_at IS NULL'),
+            ],
+          } as any,
+          transaction,
+          paranoid: false, // We're handling deleted_at manually
+        }
+      );
+
+      // Commit transaction
+      await transaction.commit();
+
+      return {
+        message: 'Asset deleted successfully',
+        assetId: id,
+      };
+    } catch (error) {
+      // Rollback on any error
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        // Ignore rollback errors
+      }
+      throw error;
+    }
   }
 }
