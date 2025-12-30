@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsOptional, IsEnum } from 'class-validator';
+import { AssetType } from '../enums';
 
 export class UpdateAssetDto {
   @ApiPropertyOptional({ example: 'Laptop-001', description: 'The label of the asset' })
@@ -12,14 +13,10 @@ export class UpdateAssetDto {
   @IsOptional()
   type?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'laptop', 
-    description: 'The asset type',
-    enum: ['phone', 'mobile', 'laptop']
-  })
-  @IsEnum(['phone', 'mobile', 'laptop'])
+  @ApiPropertyOptional({ enum: AssetType })
+  @IsEnum(AssetType)
   @IsOptional()
-  asset_type?: 'phone' | 'mobile' | 'laptop';
+  asset_type?: AssetType;
 
   @ApiPropertyOptional({ example: 'Dell XPS 15', description: 'The model of the asset' })
   @IsString()

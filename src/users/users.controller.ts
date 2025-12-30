@@ -13,6 +13,7 @@ import {
   Query,
   UseInterceptors,
   UploadedFiles,
+  ParseUUIDPipe,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
@@ -70,9 +71,10 @@ export class UsersController {
     description: 'Retrieves a specific user by its UUID.'
   })
   @ApiResponse({ status: 200, description: 'User retrieved successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid UUID format' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  @ApiParam({ name: 'id', type: 'string', description: 'The user UUID' })
-  findOne(@Param('id') id: string) {
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The user UUID' })
+  findOne(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.findOne(id);
   }
 
@@ -82,9 +84,10 @@ export class UsersController {
     description: 'Updates an existing user with new information.'
   })
   @ApiResponse({ status: 200, description: 'User updated successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid UUID format' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  @ApiParam({ name: 'id', type: 'string', description: 'The user UUID' })
-  update(@Param('id') id: string, @Body(ValidationPipe) updateUserDto: UpdateUserDto) {
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The user UUID' })
+  update(@Param('id', ParseUUIDPipe) id: string, @Body(ValidationPipe) updateUserDto: UpdateUserDto) {
     return this.usersService.update(id, updateUserDto);
   }
 
@@ -94,10 +97,11 @@ export class UsersController {
     description: 'Soft deletes a user by setting deletedAt timestamp.'
   })
   @ApiResponse({ status: 200, description: 'User deleted successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid UUID format' })
   @ApiResponse({ status: 404, description: 'User not found' })
-  @ApiParam({ name: 'id', type: 'string', description: 'The user UUID' })
+  @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The user UUID' })
   @HttpCode(HttpStatus.OK)
-  remove(@Param('id') id: string) {
+  remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.remove(id);
   }
 }

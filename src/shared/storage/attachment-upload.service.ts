@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
+import { Op } from 'sequelize';
 import { Attachment } from '../database/entities/attachment.entity';
 import { LocalStorageService } from './local-storage.service';
 
@@ -44,22 +45,37 @@ export class AttachmentUploadService {
 
   /**
    * Delete attachments from local storage and database
-   * Optimized: Parallel deletions
+   * Optimized: O(n) - single query for paths, single delete, parallel file deletions
    */
   async deleteAttachments(attachmentIds: string[]): Promise<void> {
     if (!attachmentIds || attachmentIds.length === 0) {
       return;
     }
 
-    // Get attachment file paths before deletion
+    // Get attachment file paths before deletion - cast UUIDs properly
+    const { Sequelize } = await import('sequelize');
+    // Cast each UUID string to UUID type using Sequelize.cast
+    // UUIDs should be validated before calling this method
     const attachments = await this.attachmentRepository.findAll({
-      where: { id: attachmentIds },
+      where: {
+        id: {
+          [Op.in]: attachmentIds.map(id => 
+            Sequelize.cast(id, 'UUID')
+          )
+        }
+      },
       attributes: ['id', 'path_URL'],
     });
 
-    // Delete from database
+    // Delete from database - cast UUIDs properly
     await this.attachmentRepository.destroy({
-      where: { id: attachmentIds },
+      where: {
+        id: {
+          [Op.in]: attachmentIds.map(id => 
+            Sequelize.cast(id, 'UUID')
+          )
+        }
+      },
     });
 
     // Delete from local storage in parallel

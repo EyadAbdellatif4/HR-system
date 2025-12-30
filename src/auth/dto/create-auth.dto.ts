@@ -1,6 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsNotEmpty, IsString, MinLength, MaxLength, IsBoolean, IsDateString, IsUUID, IsEnum, IsArray } from 'class-validator';
 import { ValidationPattern, ErrorMessage } from '../../shared/enums';
+import { TransformBoolean } from '../../shared/decorators/transform-boolean.decorator';
+import { TransformArray } from '../../shared/decorators/transform-array.decorator';
+import { WorkLocation } from '../../users/enums';
 
 /**
  * RegisterDto is a DTO for registering a new user
@@ -47,14 +50,10 @@ export class RegisterDto {
   @IsString({ message: ErrorMessage.ADDRESS_MUST_BE_STRING })
   address: string;
 
-  @ApiProperty({ 
-    example: 'hybrid', 
-    description: 'The work location type',
-    enum: ['in-office', 'hybrid', 'remote']
-  })
-  @IsEnum(['in-office', 'hybrid', 'remote'], { message: ErrorMessage.WORK_LOCATION_MUST_BE_ENUM })
+  @ApiProperty({ enum: WorkLocation })
+  @IsEnum(WorkLocation, { message: ErrorMessage.WORK_LOCATION_MUST_BE_ENUM })
   @IsNotEmpty({ message: ErrorMessage.WORK_LOCATION_REQUIRED })
-  work_location: 'in-office' | 'hybrid' | 'remote';
+  work_location: WorkLocation;
 
   @ApiProperty({ 
     example: '2025-01-01', 
@@ -64,18 +63,14 @@ export class RegisterDto {
   @IsNotEmpty({ message: ErrorMessage.JOIN_DATE_REQUIRED })
   join_date: string;
 
-  @ApiProperty({ 
-    example: true, 
-    description: 'Whether the user has social insurance'
-  })
+  @ApiProperty({ example: true })
+  @TransformBoolean()
   @IsBoolean({ message: ErrorMessage.SOCIAL_INSURANCE_MUST_BE_BOOLEAN })
   @IsNotEmpty({ message: ErrorMessage.SOCIAL_INSURANCE_REQUIRED })
   social_insurance: boolean;
 
-  @ApiProperty({ 
-    example: true, 
-    description: 'Whether the user has medical insurance'
-  })
+  @ApiProperty({ example: true })
+  @TransformBoolean()
   @IsBoolean({ message: ErrorMessage.MEDICAL_INSURANCE_MUST_BE_BOOLEAN })
   @IsNotEmpty({ message: ErrorMessage.MEDICAL_INSURANCE_REQUIRED })
   medical_insurance: boolean;
@@ -88,11 +83,8 @@ export class RegisterDto {
   @IsNotEmpty({ message: 'Title is required' })
   title: string;
 
-  @ApiProperty({ 
-    example: ['uuid1', 'uuid2'], 
-    description: 'Array of department IDs',
-    type: [String]
-  })
+  @ApiProperty({ type: [String], format: 'uuid' })
+  @TransformArray()
   @IsArray({ message: 'Departments must be an array' })
   @IsUUID(undefined, { each: true, message: ErrorMessage.DEPARTMENT_ID_MUST_BE_UUID })
   @IsNotEmpty({ message: ErrorMessage.DEPARTMENT_ID_REQUIRED })

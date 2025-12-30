@@ -1,7 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsBoolean, IsDateString, IsUUID, IsEnum, IsArray, IsOptional } from 'class-validator';
-import { Transform } from 'class-transformer';
 import { TransformArray } from '../../shared/decorators/transform-array.decorator';
+import { TransformBoolean } from '../../shared/decorators/transform-boolean.decorator';
+import { TransformNullable } from '../../shared/decorators/transform-nullable.decorator';
+import { WorkLocation } from '../enums';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ example: 'EMP001', description: 'User number' })
@@ -19,21 +21,19 @@ export class UpdateUserDto {
   @IsOptional()
   address?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'hybrid', 
-    description: 'Work location',
-    enum: ['in-office', 'hybrid', 'remote']
-  })
-  @IsEnum(['in-office', 'hybrid', 'remote'])
+  @ApiPropertyOptional({ enum: WorkLocation })
+  @IsEnum(WorkLocation)
   @IsOptional()
-  work_location?: 'in-office' | 'hybrid' | 'remote';
+  work_location?: WorkLocation;
 
-  @ApiPropertyOptional({ example: true, description: 'Social insurance' })
+  @ApiPropertyOptional({ example: true })
+  @TransformBoolean()
   @IsBoolean()
   @IsOptional()
   social_insurance?: boolean;
 
-  @ApiPropertyOptional({ example: true, description: 'Medical insurance' })
+  @ApiPropertyOptional({ example: true })
+  @TransformBoolean()
   @IsBoolean()
   @IsOptional()
   medical_insurance?: boolean;
@@ -43,29 +43,32 @@ export class UpdateUserDto {
   @IsOptional()
   join_date?: string;
 
-  @ApiPropertyOptional({ example: '2025-12-31', description: 'Contract date' })
-  @IsDateString()
+  @ApiPropertyOptional({ example: '2025-12-31', nullable: true })
+  @TransformNullable()
   @IsOptional()
-  contract_date?: string;
+  @IsDateString()
+  contract_date?: string | null;
 
-  @ApiPropertyOptional({ example: '2026-12-31', description: 'Exit date' })
-  @IsDateString()
+  @ApiPropertyOptional({ example: '2026-12-31', nullable: true })
+  @TransformNullable()
   @IsOptional()
-  exit_date?: string;
+  @IsDateString()
+  exit_date?: string | null;
 
   @ApiPropertyOptional({ example: 'uuid', description: 'Role ID' })
   @IsUUID()
   @IsOptional()
   role_id?: string;
 
-  @ApiPropertyOptional({ example: 'Software Engineer', description: 'User title' })
-  @IsString()
+  @ApiPropertyOptional({ example: 'Software Engineer', nullable: true })
+  @TransformNullable()
   @IsOptional()
-  title?: string;
+  @IsString()
+  title?: string | null;
 
   @ApiPropertyOptional({ 
     type: [String],
-    description: 'Personal phone numbers as array. Can send as array or JSON string. Leave empty to omit',
+    description: 'Personal phone numbers as array',
     example: ['0145325235', '425235325453'],
     required: false,
     nullable: true
@@ -77,15 +80,15 @@ export class UpdateUserDto {
   personal_phone?: string[];
 
   @ApiPropertyOptional({ 
-    type: String,
-    description: 'Department IDs. Can be: JSON array string ["uuid1", "uuid2"], comma-separated "uuid1,uuid2", or leave empty/uncheck to omit',
-    example: '["uuid1", "uuid2"]',
+    type: [String],
+    description: 'Department IDs as array',
+    example: ['uuid1', 'uuid2'],
     required: false,
     nullable: true
   })
   @IsOptional()
   @TransformArray()
-  @IsArray({ message: 'department_ids must be an array. Use JSON format: ["uuid1", "uuid2"] or comma-separated: "uuid1,uuid2"' })
+  @IsArray({ message: 'department_ids must be an array' })
   @IsUUID(undefined, { each: true })
   department_ids?: string[];
 }

@@ -92,11 +92,20 @@ export class AuthService {
       });
     }
 
-    // Verify departments exist if provided
+    // Verify departments exist if provided - cast UUIDs properly
     if (departments && departments.length > 0) {
       const { Department } = await import('../departments/entities/department.entity');
+      const { Sequelize } = await import('sequelize');
+      // Cast each UUID string to UUID type using Sequelize.cast
+      // UUIDs validated by DTO @IsUUID decorator
       const existingDepartments = await Department.findAll({
-        where: { id: departments },
+        where: {
+          id: {
+            [Op.in]: departments.map(id => 
+              Sequelize.cast(id, 'UUID')
+            )
+          }
+        },
         attributes: ['id'],
       });
       if (existingDepartments.length !== departments.length) {

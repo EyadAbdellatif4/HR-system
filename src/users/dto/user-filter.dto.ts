@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsBoolean, IsDateString, IsEnum, IsUUID } from 'class-validator';
-import { Type, Transform } from 'class-transformer';
+import { IsOptional, IsString, IsDateString, IsEnum, IsUUID } from 'class-validator';
 import { BaseFilterDto } from '../../shared/dto/base-filter.dto';
+import { TransformBoolean } from '../../shared/decorators/transform-boolean.decorator';
+import { WorkLocation, UserRole } from '../enums';
 
 export class UserFilterDto extends BaseFilterDto {
   @ApiPropertyOptional({ example: 'EMP001', description: 'Search by user number' })
@@ -14,41 +15,25 @@ export class UserFilterDto extends BaseFilterDto {
   @IsOptional()
   name?: string;
 
-  @ApiPropertyOptional({ 
-    example: 'hybrid', 
-    description: 'Filter by work location',
-    enum: ['in-office', 'hybrid', 'remote']
-  })
-  @IsEnum(['in-office', 'hybrid', 'remote'])
+  @ApiPropertyOptional({ enum: WorkLocation })
+  @IsEnum(WorkLocation)
   @IsOptional()
-  work_location?: 'in-office' | 'hybrid' | 'remote';
+  work_location?: WorkLocation;
 
-  @ApiPropertyOptional({ 
-    example: 'true', 
-    description: 'Filter by social insurance. Accepts: "true" or "false"',
-    type: String
-  })
+  @ApiPropertyOptional({ example: true })
+  @TransformBoolean()
   @IsOptional()
-  @IsString()
-  social_insurance?: string;
+  social_insurance?: boolean;
 
-  @ApiPropertyOptional({ 
-    example: 'true', 
-    description: 'Filter by medical insurance. Accepts: "true" or "false"',
-    type: String
-  })
+  @ApiPropertyOptional({ example: true })
+  @TransformBoolean()
   @IsOptional()
-  @IsString()
-  medical_insurance?: string;
+  medical_insurance?: boolean;
 
-  @ApiPropertyOptional({ 
-    example: 'user', 
-    description: 'Filter by role name',
-    enum: ['admin', 'user']
-  })
-  @IsEnum(['admin', 'user'])
+  @ApiPropertyOptional({ enum: UserRole })
+  @IsEnum(UserRole)
   @IsOptional()
-  role?: 'admin' | 'user';
+  role?: UserRole;
 
   @ApiPropertyOptional({ example: 'Software Engineer', description: 'Filter by title' })
   @IsString()

@@ -8,8 +8,8 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { UserFilterDto } from './dto/user-filter.dto';
 import { User } from './entities/user.entity';
-import { InjectModel } from '@nestjs/sequelize';
-import { Op } from 'sequelize';
+import { InjectModel, InjectConnection } from '@nestjs/sequelize';
+import { Op, Sequelize, Transaction } from 'sequelize';
 import { buildWhereClause, buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
 import { calculateOffset, getPaginationParams, getPaginationMetadata } from '../shared/utils/pagination.util';
 import { Role } from '../role/entities/role.entity';
@@ -21,17 +21,27 @@ import * as crypto from 'crypto';
 
 /**
  * Common includes for user queries to avoid repetition
+ * Note: Attachments are fetched separately due to polymorphic relationship
  */
 const getUserIncludes = () => [
   { model: Role, as: 'role', attributes: ['id', 'name'] },
   { model: Department, as: 'departments', attributes: ['id', 'name'], through: { attributes: [] } },
-  { 
-    model: Attachment, 
-    as: 'attachments', 
-    attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
-    required: false,
-  },
 ];
+
+/**
+ * Fetch attachments for a user (separate query for polymorphic relationship)
+ * Time Complexity: O(1) - indexed lookup on entity_id and entity_type
+ */
+async function getUserAttachments(userId: string): Promise<Attachment[]> {
+  return await Attachment.findAll({
+    where: {
+      entity_id: userId, // entity_id is VARCHAR, userId is UUID string - PostgreSQL handles conversion
+      entity_type: 'users',
+    },
+    attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
+    order: [['created_at', 'DESC']],
+  });
+}
 
 @Injectable()
 export class UsersService {
@@ -40,113 +50,169 @@ export class UsersService {
     private userRepository: typeof User,
     @InjectModel(Role)
     private roleRepository: typeof Role,
+    @InjectConnection()
+    private sequelize: Sequelize,
     private attachmentUploadService: AttachmentUploadService,
   ) {}
 
   /**
    * Create a new user
-   * Optimized: Parallel validation queries, single user creation, batch department association
+   * Optimized: O(1) validations, single transaction, batch operations
+   * Time Complexity: O(1) for validations, O(n) for department associations where n = number of departments
    */
   async create(createUserDto: CreateUserDto, files?: Express.Multer.File[]) {
     const { department_ids, role, password, personal_phone, ...userData } = createUserDto;
     
-    // Handle empty arrays - convert to undefined if empty
-    const processedDepartmentIds = department_ids && department_ids.length > 0 ? department_ids : undefined;
+    // Normalize department_ids: undefined if empty array
+    const departmentIds = department_ids && department_ids.length > 0 ? department_ids : undefined;
 
-    // Parallel validation: check user_number, username uniqueness, and get role
-    const [existingUserByNumber, existingUserByUsername, userRole] = await Promise.all([
-      this.userRepository.findOne({
-        where: { user_number: userData.user_number },
-        attributes: ['id'],
-      }),
-      this.userRepository.findOne({
-        where: { username: userData.username },
-        attributes: ['id'],
-      }),
-      this.roleRepository.findOne({
-        where: { name: role },
-        attributes: ['id', 'name'],
-      }),
-    ]);
+    // Start transaction for atomicity
+    const transaction = await this.sequelize.transaction();
 
-    if (existingUserByNumber) {
-      throw new ConflictException({
-        message: 'User with this user number already exists',
-        error: 'Conflict',
-        statusCode: 409,
-      });
-    }
+    try {
+      // Parallel validations: O(1) - all use indexed lookups
+      const [existingUserByNumber, existingUserByUsername, userRole] = await Promise.all([
+        this.userRepository.findOne({
+          where: { user_number: userData.user_number },
+          attributes: ['id'],
+          transaction,
+        }),
+        this.userRepository.findOne({
+          where: { username: userData.username },
+          attributes: ['id'],
+          transaction,
+        }),
+        this.roleRepository.findOne({
+          where: { name: role },
+          attributes: ['id', 'name'],
+          transaction,
+        }),
+      ]);
 
-    if (existingUserByUsername) {
-      throw new ConflictException({
-        message: 'User with this username already exists',
-        error: 'Conflict',
-        statusCode: 409,
-      });
-    }
+      // Early validation failures - O(1)
+      if (existingUserByNumber) {
+        await transaction.rollback();
+        throw new ConflictException({
+          message: 'User with this user number already exists',
+          error: 'Conflict',
+          statusCode: 409,
+        });
+      }
 
-    if (!userRole) {
-      throw new NotFoundException({
-        message: `Role '${role}' not found. Available roles: admin, user`,
-        error: 'Not Found',
-        statusCode: 404,
-      });
-    }
+      if (existingUserByUsername) {
+        await transaction.rollback();
+        throw new ConflictException({
+          message: 'User with this username already exists',
+          error: 'Conflict',
+          statusCode: 409,
+        });
+      }
 
-    // Verify departments exist if provided
-    if (processedDepartmentIds && processedDepartmentIds.length > 0) {
-      const existingDepartments = await Department.findAll({
-        where: { id: processedDepartmentIds },
-        attributes: ['id'],
-      });
-      if (existingDepartments.length !== processedDepartmentIds.length) {
-        const foundIds = existingDepartments.map(d => d.id);
-        const missingIds = processedDepartmentIds.filter(id => !foundIds.includes(id));
+      if (!userRole) {
+        await transaction.rollback();
         throw new NotFoundException({
-          message: `Department(s) not found: ${missingIds.join(', ')}`,
+          message: `Role '${role}' not found. Available roles: admin, user`,
           error: 'Not Found',
           statusCode: 404,
         });
       }
+
+      // Validate departments if provided: O(n) where n = number of department_ids
+      // Use Sequelize.where with cast to ensure proper UUID type handling in PostgreSQL
+      if (departmentIds && departmentIds.length > 0) {
+        // Cast each UUID string to UUID type using Sequelize.cast
+        // UUIDs are validated by DTO @IsUUID decorator
+        const existingDepartments = await Department.findAll({
+          where: {
+            id: {
+              [Op.in]: departmentIds.map(id => 
+                Sequelize.cast(id, 'UUID')
+              )
+            }
+          },
+          attributes: ['id'],
+          transaction,
+        });
+        
+        // O(n) comparison - but n is typically small (< 10)
+        if (existingDepartments.length !== departmentIds.length) {
+          await transaction.rollback();
+          const foundIdsSet = new Set(existingDepartments.map(d => d.id));
+          const missingIds = departmentIds.filter(id => !foundIdsSet.has(id));
+          throw new NotFoundException({
+            message: `Department(s) not found: ${missingIds.join(', ')}`,
+            error: 'Not Found',
+            statusCode: 404,
+          });
+        }
+      }
+
+      // Hash password: O(1)
+      const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+
+      // Prepare user data: O(1)
+      const userDataWithDates = {
+        ...userData,
+        password: hashedPassword,
+        role_id: userRole.id,
+        personal_phone: personal_phone && personal_phone.length > 0 ? personal_phone : null,
+        join_date: userData.join_date ? new Date(userData.join_date) : undefined,
+        contract_date: userData.contract_date ? new Date(userData.contract_date) : undefined,
+        exit_date: userData.exit_date ? new Date(userData.exit_date) : undefined,
+      };
+
+      // Create user: O(1)
+      const user = await this.userRepository.create(userDataWithDates as any, { transaction });
+
+      // Batch create department associations: O(n) where n = number of departments
+      if (departmentIds && departmentIds.length > 0) {
+        const { UserDepartment } = await import('../shared/database/entities/user-department.entity');
+        const userDepartmentRecords = departmentIds.map(deptId => ({
+          user_id: user.id,
+          department_id: deptId,
+        }));
+        await UserDepartment.bulkCreate(userDepartmentRecords as any, { transaction });
+      }
+
+      // Commit transaction: O(1)
+      await transaction.commit();
+
+       // File uploads (non-blocking, outside transaction): O(m) where m = number of files
+       if (files && files.length > 0) {
+         try {
+           await this.attachmentUploadService.uploadAndSaveAttachments(files, user.id, 'users');
+         } catch (fileError) {
+           console.error('File upload failed after user creation:', fileError);
+         }
+       }
+
+      // Fetch user with relations: O(1) with proper indexes
+      const createdUser = await this.userRepository.findByPk(user.id, {
+        include: getUserIncludes(),
+        attributes: { exclude: ['password'] },
+      });
+
+      // Fetch attachments separately (polymorphic relationship): O(1)
+      const attachments = await getUserAttachments(user.id);
+      
+      // Attach attachments to user object
+      if (createdUser) {
+        (createdUser as any).attachments = attachments;
+      }
+
+      return {
+        message: 'User created successfully',
+        user: createdUser,
+      };
+    } catch (error) {
+      // Rollback on any error
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        // Ignore rollback errors
+      }
+      throw error;
     }
-
-    // Hash password using SHA-256 (same as auth service)
-    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-
-    // Convert date strings to Date objects
-    const userDataWithDates = {
-      ...userData,
-      password: hashedPassword,
-      role_id: userRole.id,
-      personal_phone: personal_phone && personal_phone.length > 0 ? personal_phone : null,
-      join_date: userData.join_date ? new Date(userData.join_date) : undefined,
-      contract_date: userData.contract_date ? new Date(userData.contract_date) : undefined,
-      exit_date: userData.exit_date ? new Date(userData.exit_date) : undefined,
-    };
-
-    // Create user
-    const user = await this.userRepository.create(userDataWithDates as any);
-
-    // Associate departments if provided (batch operation)
-    if (processedDepartmentIds && processedDepartmentIds.length > 0) {
-      await user.$set('departments', processedDepartmentIds);
-    }
-
-    // Upload and save attachments if provided
-    if (files && files.length > 0) {
-      await this.attachmentUploadService.uploadAndSaveAttachments(files, user.id, 'users');
-    }
-
-    // Reload user with relations in a single query (exclude password from response)
-    const createdUser = await this.userRepository.findByPk(user.id, {
-      include: getUserIncludes(),
-      attributes: { exclude: ['password'] },
-    });
-
-    return {
-      message: 'User created successfully',
-      user: createdUser,
-    };
   }
 
   /**
@@ -195,13 +261,13 @@ export class UsersService {
         where.work_location = filterDto.work_location;
       }
 
-      // Boolean filters - simple string to boolean conversion
-      if (filterDto?.social_insurance) {
-        where.social_insurance = filterDto.social_insurance === 'true';
+      // Boolean filters - already transformed by TransformBoolean decorator
+      if (filterDto?.social_insurance !== undefined) {
+        where.social_insurance = filterDto.social_insurance;
       }
 
-      if (filterDto?.medical_insurance) {
-        where.medical_insurance = filterDto.medical_insurance === 'true';
+      if (filterDto?.medical_insurance !== undefined) {
+        where.medical_insurance = filterDto.medical_insurance;
       }
 
       // Role filter - use pre-fetched role_id
@@ -266,6 +332,35 @@ export class UsersService {
         distinct: true, // Important for count with joins
       });
 
+      // Fetch attachments for all users in parallel: O(n) where n = number of users
+      // This is more efficient than N+1 queries
+      if (users.length > 0) {
+        const userIds = users.map(u => u.id);
+        const allAttachments = await Attachment.findAll({
+          where: {
+            entity_id: { [Op.in]: userIds },
+            entity_type: 'users',
+          },
+          attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at', 'entity_id'],
+          order: [['created_at', 'DESC']],
+        });
+
+        // Group attachments by user_id
+        const attachmentsByUserId = new Map<string, Attachment[]>();
+        allAttachments.forEach(attachment => {
+          const userId = attachment.entity_id;
+          if (!attachmentsByUserId.has(userId)) {
+            attachmentsByUserId.set(userId, []);
+          }
+          attachmentsByUserId.get(userId)!.push(attachment);
+        });
+
+        // Attach attachments to each user
+        users.forEach(user => {
+          (user as any).attachments = attachmentsByUserId.get(user.id) || [];
+        });
+      }
+
       const pagination = getPaginationMetadata(total, page, limit);
 
       return {
@@ -288,17 +383,10 @@ export class UsersService {
 
   /**
    * Get a user by ID
-   * Optimized: Single query with all relations
+   * Optimized: User query + separate attachment query
+   * Note: UUID validation is handled by ParseUUIDPipe in controller
    */
   async findOne(id: string) {
-    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      throw new BadRequestException({
-        message: 'Invalid user ID format. Expected UUID format.',
-        error: 'Bad Request',
-        statusCode: 400,
-      });
-    }
-
     const user = await this.userRepository.findByPk(id, {
       include: getUserIncludes(),
       attributes: { exclude: ['password'] },
@@ -312,6 +400,10 @@ export class UsersService {
       });
     }
 
+    // Fetch attachments separately (polymorphic relationship): O(1)
+    const attachments = await getUserAttachments(id);
+    (user as any).attachments = attachments;
+
     return {
       message: 'User retrieved successfully',
       user,
@@ -321,15 +413,9 @@ export class UsersService {
   /**
    * Update a user
    * Optimized: Check existence and conflict in parallel, single update query
+   * Note: UUID validation is handled by ParseUUIDPipe in controller
    */
   async update(id: string, updateUserDto: UpdateUserDto) {
-    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      throw new BadRequestException({
-        message: 'Invalid user ID format. Expected UUID format.',
-        error: 'Bad Request',
-        statusCode: 400,
-      });
-    }
 
     const { department_ids, ...updateData } = updateUserDto;
 
@@ -361,29 +447,94 @@ export class UsersService {
       });
     }
 
-    // Convert date strings to Date objects if present
-    const updateDataWithDates: any = { ...updateData };
-    if (updateData.join_date) {
-      updateDataWithDates.join_date = new Date(updateData.join_date);
-    }
-    if (updateData.contract_date) {
-      updateDataWithDates.contract_date = new Date(updateData.contract_date);
-    }
-    if (updateData.exit_date) {
-      updateDataWithDates.exit_date = new Date(updateData.exit_date);
-    }
+    // Start transaction
+    const transaction = await this.sequelize.transaction();
 
-    // Update user and departments in parallel
-    await Promise.all([
-      this.userRepository.update(updateDataWithDates, { where: { id } }),
-      department_ids !== undefined ? user.$set('departments', department_ids) : Promise.resolve(),
-    ]);
+    try {
+      // Verify departments exist if provided - cast UUIDs properly
+      if (department_ids !== undefined && department_ids.length > 0) {
+        // Cast each UUID string to UUID type using Sequelize.cast
+        // UUIDs validated by DTO @IsUUID decorator
+        const existingDepartments = await Department.findAll({
+          where: {
+            id: {
+              [Op.in]: department_ids.map(id => 
+                Sequelize.cast(id, 'UUID')
+              )
+            }
+          },
+          attributes: ['id'],
+          transaction,
+        });
+        if (existingDepartments.length !== department_ids.length) {
+          await transaction.rollback();
+          const foundIdsSet = new Set(existingDepartments.map(d => d.id));
+          const missingIds = department_ids.filter(id => !foundIdsSet.has(id));
+          throw new NotFoundException({
+            message: `Department(s) not found: ${missingIds.join(', ')}`,
+            error: 'Not Found',
+            statusCode: 404,
+          });
+        }
+      }
+
+      // Convert date strings to Date objects if present
+      const updateDataWithDates: any = { ...updateData };
+      if (updateData.join_date) {
+        updateDataWithDates.join_date = new Date(updateData.join_date);
+      }
+      if (updateData.contract_date) {
+        updateDataWithDates.contract_date = new Date(updateData.contract_date);
+      }
+      if (updateData.exit_date) {
+        updateDataWithDates.exit_date = new Date(updateData.exit_date);
+      }
+
+      // Update user within transaction
+      await this.userRepository.update(updateDataWithDates, { where: { id }, transaction });
+
+      // Update departments if provided - use bulk operations to avoid UUID comparison issues
+      if (department_ids !== undefined) {
+        const { UserDepartment } = await import('../shared/database/entities/user-department.entity');
+        // Remove all existing associations
+        await UserDepartment.destroy({
+          where: { user_id: id },
+          transaction,
+        });
+        // Add new associations if any
+        if (department_ids.length > 0) {
+          const userDepartmentRecords = department_ids.map(deptId => ({
+            user_id: id,
+            department_id: deptId,
+          }));
+          await UserDepartment.bulkCreate(userDepartmentRecords as any, { transaction });
+        }
+      }
+
+      // Commit transaction
+      await transaction.commit();
+    } catch (error) {
+      // Rollback transaction on any error
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        // Transaction might already be rolled back, ignore
+      }
+      // Re-throw the error so NestJS can handle it
+      throw error;
+    }
 
     // Fetch updated user with relations (exclude password from response)
     const updatedUser = await this.userRepository.findByPk(id, {
       include: getUserIncludes(),
       attributes: { exclude: ['password'] },
     });
+
+    // Fetch attachments separately (polymorphic relationship): O(1)
+    const attachments = await getUserAttachments(id);
+    if (updatedUser) {
+      (updatedUser as any).attachments = attachments;
+    }
 
     return {
       message: 'User updated successfully',
@@ -394,15 +545,9 @@ export class UsersService {
   /**
    * Soft delete a user
    * Optimized: Single update query
+   * Note: UUID validation is handled by ParseUUIDPipe in controller
    */
   async remove(id: string) {
-    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
-      throw new BadRequestException({
-        message: 'Invalid user ID format. Expected UUID format.',
-        error: 'Bad Request',
-        statusCode: 400,
-      });
-    }
 
     const [affectedRows] = await this.userRepository.update(
       { deletedAt: new Date(), is_active: false },

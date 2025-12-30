@@ -81,10 +81,12 @@ async function bootstrap() {
     swaggerOptions: {
       persistAuthorization: true,
       displayRequestDuration: true,
-      docExpansion: 'none',
+      docExpansion: 'list',
       filter: true,
       showRequestHeaders: true,
       tryItOutEnabled: true,
+      defaultModelsExpandDepth: 1,
+      defaultModelExpandDepth: 1,
     },
     customSiteTitle: 'HR System API Documentation',
     customfavIcon: '/favicon.ico',
@@ -92,6 +94,8 @@ async function bootstrap() {
       .swagger-ui .topbar { display: none }
       .swagger-ui .info .title { color: #3b82f6; }
       .swagger-ui .scheme-container { background: #f8fafc; padding: 20px; border-radius: 8px; margin: 20px 0; }
+      .swagger-ui textarea { min-height: auto !important; height: auto !important; }
+      .swagger-ui input[type="text"], .swagger-ui input[type="date"] { height: auto !important; }
     `,
   });
 
