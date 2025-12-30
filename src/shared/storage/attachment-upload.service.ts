@@ -31,15 +31,23 @@ export class AttachmentUploadService {
 
     // Create attachment records in batch
     const attachmentRecords = uploadResults.map(result => ({
-      entity_id: entityId,
+      entity_id: String(entityId), // Ensure string for VARCHAR column
       entity_type: entityType,
-      name: result.name,
-      type: result.type,
-      extension: result.extension,
+      name: result.name || 'unnamed',
+      type: result.type || 'application/octet-stream',
+      extension: result.extension || '',
       path_URL: result.filePath,
-    })) as any;
+    }));
 
-    const createdAttachments = await this.attachmentRepository.bulkCreate(attachmentRecords);
+    // Bulk create with returning: true to ensure we get the created records
+    const createdAttachments = await this.attachmentRepository.bulkCreate(attachmentRecords as any, {
+      returning: true,
+    });
+    
+    if (!createdAttachments || createdAttachments.length === 0) {
+      throw new Error(`Failed to create attachment records. Expected ${attachmentRecords.length}, got 0`);
+    }
+
     return createdAttachments;
   }
 

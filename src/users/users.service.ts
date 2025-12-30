@@ -15,6 +15,7 @@ import { calculateOffset, getPaginationParams, getPaginationMetadata } from '../
 import { Role } from '../role/entities/role.entity';
 import { Department } from '../departments/entities/department.entity';
 import { Attachment } from '../shared/database/entities/attachment.entity';
+import { UserDepartment } from '../shared/database/entities/user-department.entity';
 import { AttachmentUploadService } from '../shared/storage/attachment-upload.service';
 import { RoleName } from '../shared/enums';
 import * as crypto from 'crypto';
@@ -166,7 +167,6 @@ export class UsersService {
 
       // Batch create department associations: O(n) where n = number of departments
       if (departmentIds && departmentIds.length > 0) {
-        const { UserDepartment } = await import('../shared/database/entities/user-department.entity');
         const userDepartmentRecords = departmentIds.map(deptId => ({
           user_id: user.id,
           department_id: deptId,
@@ -177,14 +177,18 @@ export class UsersService {
       // Commit transaction: O(1)
       await transaction.commit();
 
-       // File uploads (non-blocking, outside transaction): O(m) where m = number of files
-       if (files && files.length > 0) {
-         try {
-           await this.attachmentUploadService.uploadAndSaveAttachments(files, user.id, 'users');
-         } catch (fileError) {
-           console.error('File upload failed after user creation:', fileError);
-         }
-       }
+      // File uploads (non-blocking, outside transaction): O(m) where m = number of files
+      if (files && files.length > 0) {
+        try {
+          const savedAttachments = await this.attachmentUploadService.uploadAndSaveAttachments(files, user.id, 'users');
+          if (!savedAttachments || savedAttachments.length === 0) {
+            console.error('Warning: Files uploaded but no attachment records created');
+          }
+        } catch (fileError) {
+          console.error('File upload/attachment save failed:', fileError);
+          // Don't throw - user is already created, just log the error
+        }
+      }
 
       // Fetch user with relations: O(1) with proper indexes
       const createdUser = await this.userRepository.findByPk(user.id, {
@@ -195,14 +199,15 @@ export class UsersService {
       // Fetch attachments separately (polymorphic relationship): O(1)
       const attachments = await getUserAttachments(user.id);
       
-      // Attach attachments to user object
-      if (createdUser) {
-        (createdUser as any).attachments = attachments;
+      // Convert user to plain object and attach attachments for proper serialization
+      const userResponse = createdUser ? createdUser.toJSON() : null;
+      if (userResponse) {
+        userResponse.attachments = attachments.map(att => att.toJSON());
       }
 
       return {
         message: 'User created successfully',
-        user: createdUser,
+        user: userResponse,
       };
     } catch (error) {
       // Rollback on any error
@@ -402,11 +407,14 @@ export class UsersService {
 
     // Fetch attachments separately (polymorphic relationship): O(1)
     const attachments = await getUserAttachments(id);
-    (user as any).attachments = attachments;
+    
+    // Convert to plain object and attach attachments for proper serialization
+    const userResponse = user.toJSON();
+    userResponse.attachments = attachments.map(att => att.toJSON());
 
     return {
       message: 'User retrieved successfully',
-      user,
+      user: userResponse,
     };
   }
 
@@ -495,7 +503,6 @@ export class UsersService {
 
       // Update departments if provided - use bulk operations to avoid UUID comparison issues
       if (department_ids !== undefined) {
-        const { UserDepartment } = await import('../shared/database/entities/user-department.entity');
         // Remove all existing associations
         await UserDepartment.destroy({
           where: { user_id: id },
@@ -532,13 +539,16 @@ export class UsersService {
 
     // Fetch attachments separately (polymorphic relationship): O(1)
     const attachments = await getUserAttachments(id);
-    if (updatedUser) {
-      (updatedUser as any).attachments = attachments;
+    
+    // Convert to plain object and attach attachments for proper serialization
+    const userResponse = updatedUser ? updatedUser.toJSON() : null;
+    if (userResponse) {
+      userResponse.attachments = attachments.map(att => att.toJSON());
     }
 
     return {
       message: 'User updated successfully',
-      user: updatedUser,
+      user: userResponse,
     };
   }
 
