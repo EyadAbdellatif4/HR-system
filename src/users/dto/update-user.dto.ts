@@ -1,27 +1,40 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsBoolean, IsDateString, IsUUID, IsEnum, IsArray, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { TransformArray } from '../../shared/decorators/transform-array.decorator';
 import { TransformBoolean } from '../../shared/decorators/transform-boolean.decorator';
 import { TransformNullable } from '../../shared/decorators/transform-nullable.decorator';
 import { WorkLocation } from '../enums';
 
+/**
+ * Transforms empty strings to undefined for optional fields
+ * This is needed for formData where empty fields are sent as empty strings
+ */
+const TransformEmptyToUndefined = () => Transform(({ value }) => 
+  value === '' || value === null ? undefined : value
+);
+
 export class UpdateUserDto {
   @ApiPropertyOptional({ example: 'EMP001', description: 'User number' })
+  @TransformEmptyToUndefined()
   @IsString()
   @IsOptional()
   user_number?: string;
 
   @ApiPropertyOptional({ example: 'John Doe', description: 'User name' })
+  @TransformEmptyToUndefined()
   @IsString()
   @IsOptional()
   name?: string;
 
   @ApiPropertyOptional({ example: '123 Main St, City, Country', description: 'User address' })
+  @TransformEmptyToUndefined()
   @IsString()
   @IsOptional()
   address?: string;
 
   @ApiPropertyOptional({ enum: WorkLocation })
+  @TransformEmptyToUndefined()
   @IsEnum(WorkLocation)
   @IsOptional()
   work_location?: WorkLocation;
@@ -39,6 +52,7 @@ export class UpdateUserDto {
   medical_insurance?: boolean;
 
   @ApiPropertyOptional({ example: '2025-01-01', description: 'Join date' })
+  @TransformEmptyToUndefined()
   @IsDateString()
   @IsOptional()
   join_date?: string;
@@ -56,6 +70,7 @@ export class UpdateUserDto {
   exit_date?: string | null;
 
   @ApiPropertyOptional({ example: 'uuid', description: 'Role ID' })
+  @TransformEmptyToUndefined()
   @IsUUID()
   @IsOptional()
   role_id?: string;
@@ -91,5 +106,12 @@ export class UpdateUserDto {
   @IsArray({ message: 'department_ids must be an array' })
   @IsUUID(undefined, { each: true })
   department_ids?: string[];
+
+  @ApiPropertyOptional({
+    type: 'array',
+    items: { type: 'string', format: 'binary' },
+  })
+  @IsOptional()
+  images?: Express.Multer.File[];
 }
 

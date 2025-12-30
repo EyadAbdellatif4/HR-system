@@ -190,6 +190,14 @@ export class Asset extends Model<Asset> {
   @ApiProperty({ example: '2025-01-01 12:00:00', description: 'The deleted at date of the asset' })
   declare deletedAt: Date;
 
+  @Column({
+    type: DataType.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  })
+  @ApiProperty({ example: true, description: 'Whether the asset is active' })
+  declare is_active: boolean;
+
   @HasMany(() => AssetTracking)
   @ApiProperty({ example: true, description: 'The tracking records for this asset' })
   assetTrackings: AssetTracking[];

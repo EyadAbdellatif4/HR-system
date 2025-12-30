@@ -35,6 +35,19 @@ export class UserDepartment extends Model<UserDepartment> {
   })
   declare department_id: string;
 
+  @Column({
+    type: DataType.DATE,
+    allowNull: true,
+  })
+  declare deleted_at?: Date;
+
+  @Column({
+    type: DataType.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  })
+  declare is_active: boolean;
+
   @BelongsTo(() => User)
   user: User;
 

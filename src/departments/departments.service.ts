@@ -81,6 +81,11 @@ export class DepartmentsService {
         filterDto?.sortOrder || 'DESC'
       );
 
+      // Always filter by is_active = true (unless explicitly filtered)
+      if (filterDto?.is_active === undefined) {
+        where.is_active = true;
+      }
+
       const { rows: departments, count: total } = await this.departmentRepository.findAndCountAll({
         where,
         order: order || [['createdAt', 'DESC']],
@@ -106,7 +111,9 @@ export class DepartmentsService {
       throw new BadRequestException('Invalid department ID');
     }
 
-    const department = await this.departmentRepository.findByPk(id);
+    const department = await this.departmentRepository.findOne({
+      where: { id, is_active: true },
+    });
 
     if (!department) {
       throw new NotFoundException(`Department with ID ${id} not found`);
@@ -138,14 +145,16 @@ export class DepartmentsService {
     }
 
     const [affectedRows] = await this.departmentRepository.update(updateDepartmentDto, {
-      where: { id },
+      where: { id, is_active: true },
     });
 
     if (affectedRows === 0) {
       throw new NotFoundException(`Department with ID ${id} not found`);
     }
 
-    const updatedDepartment = await this.departmentRepository.findByPk(id);
+    const updatedDepartment = await this.departmentRepository.findOne({
+      where: { id, is_active: true },
+    });
     if (!updatedDepartment) {
       throw new NotFoundException(`Department with ID ${id} not found`);
     }
@@ -162,8 +171,8 @@ export class DepartmentsService {
     }
 
     const [affectedRows] = await this.departmentRepository.update(
-      { deletedAt: new Date() },
-      { where: { id } }
+      { deletedAt: new Date(), is_active: false },
+      { where: { id, is_active: true } }
     );
 
     if (affectedRows === 0) {

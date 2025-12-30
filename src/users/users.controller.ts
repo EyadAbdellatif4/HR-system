@@ -79,16 +79,23 @@ export class UsersController {
   }
 
   @Patch(':id')
+  @UseInterceptors(FilesInterceptor('images', 10, multerConfig))
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({ 
     summary: 'Update a user',
-    description: 'Updates an existing user with new information.'
+    description: 'Updates an existing user with new information. Can include attachment files (up to 10 files) for updating user images.'
   })
+  @ApiBody({ type: UpdateUserDto })
   @ApiResponse({ status: 200, description: 'User updated successfully' })
   @ApiResponse({ status: 400, description: 'Invalid UUID format' })
   @ApiResponse({ status: 404, description: 'User not found' })
   @ApiParam({ name: 'id', type: 'string', format: 'uuid', description: 'The user UUID' })
-  update(@Param('id', ParseUUIDPipe) id: string, @Body(ValidationPipe) updateUserDto: UpdateUserDto) {
-    return this.usersService.update(id, updateUserDto);
+  update(
+    @Param('id', ParseUUIDPipe) id: string, 
+    @Body(ValidationPipe) updateUserDto: UpdateUserDto,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    return this.usersService.update(id, updateUserDto, files);
   }
 
   @Delete(':id')

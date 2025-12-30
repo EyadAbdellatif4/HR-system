@@ -66,8 +66,10 @@ export class RoleService {
       // Build base where clause
       const where: any = {};
 
-      // Apply is_active filter (default to true if not specified)
-      if (filterDto?.is_active !== undefined) {
+      // Always filter by is_active = true (unless explicitly filtered)
+      if (filterDto?.is_active === undefined) {
+        where.is_active = true;
+      } else {
         where.is_active = filterDto.is_active;
       }
 
@@ -150,7 +152,9 @@ export class RoleService {
       throw new BadRequestException('Invalid role ID');
     }
 
-    const role = await this.roleRepository.findByPk(id);
+    const role = await this.roleRepository.findOne({
+      where: { id, is_active: true },
+    });
 
     if (!role) {
       throw new NotFoundException(`Role with ID ${id} not found`);
@@ -190,7 +194,7 @@ export class RoleService {
 
     // Optimize: Update directly and check affected rows instead of separate existence check
     const [affectedRows] = await this.roleRepository.update(updateRoleDto, {
-      where: { id },
+      where: { id, is_active: true },
     });
 
     if (affectedRows === 0) {
@@ -198,7 +202,9 @@ export class RoleService {
     }
 
     // Fetch updated role
-    const updatedRole = await this.roleRepository.findByPk(id);
+    const updatedRole = await this.roleRepository.findOne({
+      where: { id, is_active: true },
+    });
     if (!updatedRole) {
       throw new NotFoundException(`Role with ID ${id} not found`);
     }
@@ -221,8 +227,8 @@ export class RoleService {
 
     // Optimize: Update directly and check affected rows instead of separate existence check
     const [affectedRows] = await this.roleRepository.update(
-      { is_active: false },
-      { where: { id } }
+      { is_active: false, deletedAt: new Date() },
+      { where: { id, is_active: true } }
     );
 
     if (affectedRows === 0) {

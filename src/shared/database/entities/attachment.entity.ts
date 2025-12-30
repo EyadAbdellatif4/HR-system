@@ -13,6 +13,8 @@ import { ApiProperty } from '@nestjs/swagger';
   timestamps: true,
   createdAt: 'created_at',
   updatedAt: 'updated_at',
+  paranoid: true,
+  deletedAt: 'deleted_at',
 })
 export class Attachment extends Model<Attachment> {
   @PrimaryKey
@@ -66,5 +68,20 @@ export class Attachment extends Model<Attachment> {
   })
   @ApiProperty({ example: 'files/users/1234567890-abc123.pdf', description: 'The path URL of the file' })
   declare path_URL: string;
+
+  @Column({
+    type: DataType.DATE,
+    allowNull: true,
+  })
+  @ApiProperty({ example: '2025-01-01T12:00:00Z', description: 'The deletion timestamp', nullable: true })
+  declare deleted_at?: Date;
+
+  @Column({
+    type: DataType.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  })
+  @ApiProperty({ example: true, description: 'Whether the attachment is active' })
+  declare is_active: boolean;
 }
 

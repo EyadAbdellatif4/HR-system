@@ -38,9 +38,14 @@ async function getUserAttachments(userId: string): Promise<Attachment[]> {
     where: {
       entity_id: userId, // entity_id is VARCHAR, userId is UUID string - PostgreSQL handles conversion
       entity_type: 'users',
-    },
+      is_active: true,
+      [Op.and]: [
+        Sequelize.literal('deleted_at IS NULL'),
+      ],
+    } as any,
     attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
     order: [['created_at', 'DESC']],
+    paranoid: false, // We're handling deleted_at manually
   });
 }
 
@@ -129,7 +134,8 @@ export class UsersService {
               [Op.in]: departmentIds.map(id => 
                 Sequelize.cast(id, 'UUID')
               )
-            }
+            },
+            is_active: true,
           },
           attributes: ['id'],
           transaction,
@@ -151,12 +157,22 @@ export class UsersService {
       // Hash password: O(1)
       const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
 
+      // Ensure boolean values are properly converted (handle formData string values)
+      const socialInsurance = typeof userData.social_insurance === 'boolean' 
+        ? userData.social_insurance 
+        : (userData.social_insurance === 'true' || userData.social_insurance === '1');
+      const medicalInsurance = typeof userData.medical_insurance === 'boolean'
+        ? userData.medical_insurance
+        : (userData.medical_insurance === 'true' || userData.medical_insurance === '1');
+
       // Prepare user data: O(1)
       const userDataWithDates = {
         ...userData,
         password: hashedPassword,
         role_id: userRole.id,
         personal_phone: personal_phone && personal_phone.length > 0 ? personal_phone : null,
+        social_insurance: socialInsurance,
+        medical_insurance: medicalInsurance,
         join_date: userData.join_date ? new Date(userData.join_date) : undefined,
         contract_date: userData.contract_date ? new Date(userData.contract_date) : undefined,
         exit_date: userData.exit_date ? new Date(userData.exit_date) : undefined,
@@ -235,7 +251,7 @@ export class UsersService {
       let roleIdForFilter: string | null = null;
       if (filterDto?.role) {
         const role = await this.roleRepository.findOne({
-          where: { name: filterDto.role },
+          where: { name: filterDto.role, is_active: true },
           attributes: ['id'],
         });
         if (!role) {
@@ -266,12 +282,12 @@ export class UsersService {
         where.work_location = filterDto.work_location;
       }
 
-      // Boolean filters - already transformed by TransformBoolean decorator
-      if (filterDto?.social_insurance !== undefined) {
+      // Boolean filters - TransformBoolean decorator should handle conversion
+      if (filterDto?.social_insurance !== undefined && filterDto?.social_insurance !== null) {
         where.social_insurance = filterDto.social_insurance;
       }
 
-      if (filterDto?.medical_insurance !== undefined) {
+      if (filterDto?.medical_insurance !== undefined && filterDto?.medical_insurance !== null) {
         where.medical_insurance = filterDto.medical_insurance;
       }
 
@@ -326,6 +342,9 @@ export class UsersService {
         ];
       }
 
+      // Always filter by is_active = true
+      where.is_active = true;
+
       // Single optimized query with all includes (exclude password from response)
       const { rows: users, count: total } = await this.userRepository.findAndCountAll({
         where,
@@ -345,9 +364,14 @@ export class UsersService {
           where: {
             entity_id: { [Op.in]: userIds },
             entity_type: 'users',
-          },
+            is_active: true,
+            [Op.and]: [
+              Sequelize.literal('deleted_at IS NULL'),
+            ],
+          } as any,
           attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at', 'entity_id'],
           order: [['created_at', 'DESC']],
+          paranoid: false, // We're handling deleted_at manually
         });
 
         // Group attachments by user_id
@@ -360,9 +384,10 @@ export class UsersService {
           attachmentsByUserId.get(userId)!.push(attachment);
         });
 
-        // Attach attachments to each user
+        // Attach attachments to each user (convert to plain objects for proper serialization)
         users.forEach(user => {
-          (user as any).attachments = attachmentsByUserId.get(user.id) || [];
+          const userAttachments = attachmentsByUserId.get(user.id) || [];
+          (user as any).attachments = userAttachments.map(att => att.toJSON());
         });
       }
 
@@ -392,7 +417,8 @@ export class UsersService {
    * Note: UUID validation is handled by ParseUUIDPipe in controller
    */
   async findOne(id: string) {
-    const user = await this.userRepository.findByPk(id, {
+    const user = await this.userRepository.findOne({
+      where: { id, is_active: true },
       include: getUserIncludes(),
       attributes: { exclude: ['password'] },
     });
@@ -423,17 +449,18 @@ export class UsersService {
    * Optimized: Check existence and conflict in parallel, single update query
    * Note: UUID validation is handled by ParseUUIDPipe in controller
    */
-  async update(id: string, updateUserDto: UpdateUserDto) {
+  async update(id: string, updateUserDto: UpdateUserDto, files?: Express.Multer.File[]) {
 
     const { department_ids, ...updateData } = updateUserDto;
 
     // Check if user exists and check for conflicts in parallel
     const [user, conflictUser] = await Promise.all([
-      this.userRepository.findByPk(id, { attributes: ['id'] }),
+      this.userRepository.findOne({ where: { id, is_active: true }, attributes: ['id'] }),
       updateData.user_number ? this.userRepository.findOne({
         where: {
           id: { [Op.ne]: id },
           user_number: updateData.user_number,
+          is_active: true,
         },
         attributes: ['id'],
       }) : Promise.resolve(null),
@@ -469,7 +496,8 @@ export class UsersService {
               [Op.in]: department_ids.map(id => 
                 Sequelize.cast(id, 'UUID')
               )
-            }
+            },
+            is_active: true,
           },
           attributes: ['id'],
           transaction,
@@ -498,6 +526,18 @@ export class UsersService {
         updateDataWithDates.exit_date = new Date(updateData.exit_date);
       }
 
+      // Ensure boolean values are properly converted (handle formData string values)
+      if (updateData.social_insurance !== undefined) {
+        updateDataWithDates.social_insurance = typeof updateData.social_insurance === 'boolean'
+          ? updateData.social_insurance
+          : (updateData.social_insurance === 'true' || updateData.social_insurance === '1');
+      }
+      if (updateData.medical_insurance !== undefined) {
+        updateDataWithDates.medical_insurance = typeof updateData.medical_insurance === 'boolean'
+          ? updateData.medical_insurance
+          : (updateData.medical_insurance === 'true' || updateData.medical_insurance === '1');
+      }
+
       // Update user within transaction
       await this.userRepository.update(updateDataWithDates, { where: { id }, transaction });
 
@@ -518,8 +558,40 @@ export class UsersService {
         }
       }
 
+      // Soft delete old attachments if new files are being uploaded
+      if (files && files.length > 0) {
+        await Attachment.update(
+          { deleted_at: new Date(), is_active: false },
+          {
+            where: {
+              entity_id: id,
+              entity_type: 'users',
+              is_active: true,
+              [Op.and]: [
+                Sequelize.literal('deleted_at IS NULL'),
+              ],
+            } as any,
+            transaction,
+            paranoid: false, // We're handling deleted_at manually
+          }
+        );
+      }
+
       // Commit transaction
       await transaction.commit();
+
+      // File uploads (non-blocking, outside transaction): O(m) where m = number of files
+      if (files && files.length > 0) {
+        try {
+          const savedAttachments = await this.attachmentUploadService.uploadAndSaveAttachments(files, id, 'users');
+          if (!savedAttachments || savedAttachments.length === 0) {
+            console.error('Warning: Files uploaded but no attachment records created');
+          }
+        } catch (fileError) {
+          console.error('File upload/attachment save failed:', fileError);
+          // Don't throw - user is already updated, just log the error
+        }
+      }
     } catch (error) {
       // Rollback transaction on any error
       try {
@@ -532,7 +604,8 @@ export class UsersService {
     }
 
     // Fetch updated user with relations (exclude password from response)
-    const updatedUser = await this.userRepository.findByPk(id, {
+    const updatedUser = await this.userRepository.findOne({
+      where: { id, is_active: true },
       include: getUserIncludes(),
       attributes: { exclude: ['password'] },
     });
@@ -558,13 +631,13 @@ export class UsersService {
    * Note: UUID validation is handled by ParseUUIDPipe in controller
    */
   async remove(id: string) {
+    // Check if user exists
+    const user = await this.userRepository.findOne({
+      where: { id, is_active: true },
+      attributes: ['id'],
+    });
 
-    const [affectedRows] = await this.userRepository.update(
-      { deletedAt: new Date(), is_active: false },
-      { where: { id } }
-    );
-
-    if (affectedRows === 0) {
+    if (!user) {
       throw new NotFoundException({
         message: `User with ID ${id} not found`,
         error: 'Not Found',
@@ -572,9 +645,48 @@ export class UsersService {
       });
     }
 
-    return {
-      message: 'User deleted successfully',
-      userId: id,
-    };
+    // Start transaction for atomicity
+    const transaction = await this.sequelize.transaction();
+
+    try {
+      // Soft delete user - set both deletedAt and is_active
+      await this.userRepository.update(
+        { deletedAt: new Date(), is_active: false },
+        { where: { id, is_active: true }, transaction }
+      );
+
+      // Soft delete all attachments related to this user
+      await Attachment.update(
+        { deleted_at: new Date(), is_active: false },
+        {
+          where: {
+            entity_id: id,
+            entity_type: 'users',
+            is_active: true,
+            [Op.and]: [
+              Sequelize.literal('deleted_at IS NULL'),
+            ],
+          } as any,
+          transaction,
+          paranoid: false, // We're handling deleted_at manually
+        }
+      );
+
+      // Commit transaction
+      await transaction.commit();
+
+      return {
+        message: 'User deleted successfully',
+        userId: id,
+      };
+    } catch (error) {
+      // Rollback on any error
+      try {
+        await transaction.rollback();
+      } catch (rollbackError) {
+        // Ignore rollback errors
+      }
+      throw error;
+    }
   }
 }

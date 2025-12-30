@@ -85,11 +85,22 @@ export class AssetTrackingService {
         filterDto?.sortOrder || 'DESC'
       );
 
+      // Always filter by is_active = true
+      where.is_active = true;
+
       const { rows: assetTrackings, count: total } = await this.assetTrackingRepository.findAndCountAll({
         where,
         include: [
-          { model: Asset, as: 'asset' },
-          { model: User, as: 'user' },
+          { 
+            model: Asset, 
+            as: 'asset',
+            required: false,
+          },
+          { 
+            model: User, 
+            as: 'user',
+            required: false,
+          },
         ],
         order: order || [['createdAt', 'DESC']],
         limit,
@@ -115,10 +126,19 @@ export class AssetTrackingService {
       throw new BadRequestException('Invalid asset tracking ID');
     }
 
-    const assetTracking = await this.assetTrackingRepository.findByPk(id, {
+    const assetTracking = await this.assetTrackingRepository.findOne({
+      where: { id, is_active: true },
       include: [
-        { model: Asset, as: 'asset' },
-        { model: User, as: 'user' },
+        { 
+          model: Asset, 
+          as: 'asset',
+          required: false,
+        },
+        { 
+          model: User, 
+          as: 'user',
+          required: false,
+        },
       ],
     });
 
@@ -146,17 +166,26 @@ export class AssetTrackingService {
     }
 
     const [affectedRows] = await this.assetTrackingRepository.update(updateData, {
-      where: { id },
+      where: { id, is_active: true },
     });
 
     if (affectedRows === 0) {
       throw new NotFoundException(`Asset tracking with ID ${id} not found`);
     }
 
-    const updatedTracking = await this.assetTrackingRepository.findByPk(id, {
+    const updatedTracking = await this.assetTrackingRepository.findOne({
+      where: { id, is_active: true },
       include: [
-        { model: Asset, as: 'asset' },
-        { model: User, as: 'user' },
+        { 
+          model: Asset, 
+          as: 'asset',
+          required: false,
+        },
+        { 
+          model: User, 
+          as: 'user',
+          required: false,
+        },
       ],
     });
 
@@ -172,8 +201,8 @@ export class AssetTrackingService {
     }
 
     const [affectedRows] = await this.assetTrackingRepository.update(
-      { deletedAt: new Date() },
-      { where: { id } }
+      { deletedAt: new Date(), is_active: false },
+      { where: { id, is_active: true } }
     );
 
     if (affectedRows === 0) {

@@ -35,11 +35,13 @@ export class AssetsService {
     }
 
     // Reload asset with attachments
-    const createdAsset = await this.assetRepository.findByPk(asset.id, {
+    const createdAsset = await this.assetRepository.findOne({
+      where: { id: asset.id, is_active: true },
       include: [
         { 
           model: Attachment, 
-          as: 'attachments', 
+          as: 'attachments',
+          where: { is_active: true },
           attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
           required: false,
         },
@@ -117,6 +119,9 @@ export class AssetsService {
         filterDto?.sortOrder || 'DESC'
       );
 
+      // Always filter by is_active = true
+      where.is_active = true;
+
       // Single optimized query with attachments
       const { rows: assets, count: total } = await this.assetRepository.findAndCountAll({
         where,
@@ -124,6 +129,7 @@ export class AssetsService {
           { 
             model: Attachment, 
             as: 'attachments', 
+            where: { is_active: true },
             attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
             required: false,
           },
@@ -167,11 +173,13 @@ export class AssetsService {
       });
     }
 
-    const asset = await this.assetRepository.findByPk(id, {
+    const asset = await this.assetRepository.findOne({
+      where: { id, is_active: true },
       include: [
         { 
           model: Attachment, 
-          as: 'attachments', 
+          as: 'attachments',
+          where: { is_active: true },
           attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
           required: false,
         },
@@ -206,7 +214,7 @@ export class AssetsService {
     }
 
     const [affectedRows] = await this.assetRepository.update(updateAssetDto, {
-      where: { id },
+      where: { id, is_active: true },
     });
 
     if (affectedRows === 0) {
@@ -217,7 +225,9 @@ export class AssetsService {
       });
     }
 
-    const updatedAsset = await this.assetRepository.findByPk(id);
+    const updatedAsset = await this.assetRepository.findOne({
+      where: { id, is_active: true },
+    });
     if (!updatedAsset) {
       throw new NotFoundException({
         message: `Asset with ID ${id} not found`,
@@ -246,8 +256,8 @@ export class AssetsService {
     }
 
     const [affectedRows] = await this.assetRepository.update(
-      { deletedAt: new Date() },
-      { where: { id } }
+      { deletedAt: new Date(), is_active: false },
+      { where: { id, is_active: true } }
     );
 
     if (affectedRows === 0) {
