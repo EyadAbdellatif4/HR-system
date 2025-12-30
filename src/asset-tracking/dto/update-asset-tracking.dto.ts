@@ -1,11 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsUUID, IsDateString, IsOptional } from 'class-validator';
+import { IsUUID, IsDateString, IsOptional } from 'class-validator';
 
 export class UpdateAssetTrackingDto {
-  @ApiPropertyOptional({ example: 1, description: 'Asset ID' })
-  @IsInt()
+  @ApiPropertyOptional({ example: 'uuid', description: 'Asset ID' })
+  @IsUUID()
   @IsOptional()
-  asset_id?: number;
+  asset_id?: string;
 
   @ApiPropertyOptional({ example: 'uuid', description: 'User ID' })
   @IsUUID()

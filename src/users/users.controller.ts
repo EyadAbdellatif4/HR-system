@@ -11,7 +11,10 @@ import {
   HttpStatus,
   ValidationPipe,
   Query,
+  UseInterceptors,
+  UploadedFiles,
 } from '@nestjs/common';
+import { FilesInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
@@ -19,7 +22,8 @@ import { UserFilterDto } from './dto/user-filter.dto';
 import { Roles } from 'src/auth/decorators/roles.decorator';
 import { RoleName } from '../shared/enums';
 import { AuthGuard } from 'src/auth/guards/auth.guard';
-import { ApiResponse, ApiBearerAuth, ApiTags, ApiOperation, ApiParam } from '@nestjs/swagger';
+import { ApiResponse, ApiBearerAuth, ApiTags, ApiOperation, ApiParam, ApiConsumes, ApiBody } from '@nestjs/swagger';
+import { multerConfig } from '../shared/storage/multer.config';
 
 @Controller('users')
 @ApiBearerAuth('JWT-auth')
@@ -30,17 +34,23 @@ export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
   @Post()
+  @UseInterceptors(FilesInterceptor('images', 10, multerConfig))
+  @ApiConsumes('multipart/form-data')
   @ApiOperation({ 
     summary: 'Create a new user',
-    description: 'Creates a new user with username, password, and other information. Username must be a valid email and unique. Password will be hashed before storage. Role can be "admin" or "user". Can include personal phone numbers and departments.'
+    description: 'Creates a new user with username, password, and other information. Username must be a valid email and unique. Password will be hashed before storage. Role can be "admin" or "user". Can include personal phone numbers, departments, and attachment files (up to 10 files). Files will be stored locally.'
   })
+  @ApiBody({ type: CreateUserDto })
   @ApiResponse({ status: 201, description: 'User created successfully' })
-  @ApiResponse({ status: 400, description: 'Validation error - Invalid input data' })
+  @ApiResponse({ status: 400, description: 'Validation error - Invalid input data or file upload error' })
   @ApiResponse({ status: 404, description: 'Role or department not found' })
   @ApiResponse({ status: 409, description: 'User number or username already exists' })
   @HttpCode(HttpStatus.CREATED)
-  create(@Body(ValidationPipe) createUserDto: CreateUserDto) {
-    return this.usersService.create(createUserDto);
+  create(
+    @Body(ValidationPipe) createUserDto: CreateUserDto,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    return this.usersService.create(createUserDto, files);
   }
 
   @Get()

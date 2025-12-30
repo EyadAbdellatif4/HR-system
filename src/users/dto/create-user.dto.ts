@@ -1,6 +1,8 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsNotEmpty, IsBoolean, IsDateString, IsEnum, IsArray, IsOptional, IsUUID, IsEmail, MinLength, MaxLength } from 'class-validator';
 import { ErrorMessage } from '../../shared/enums';
+import { Type, Transform } from 'class-transformer';
+import { TransformArray } from '../../shared/decorators/transform-array.decorator';
 
 export class CreateUserDto {
   @ApiProperty({ example: 'EMP001', description: 'User number (must be unique)' })
@@ -50,12 +52,30 @@ export class CreateUserDto {
   @IsNotEmpty()
   work_location: 'in-office' | 'hybrid' | 'remote';
 
-  @ApiProperty({ example: true, description: 'Social insurance' })
+  @ApiProperty({ 
+    example: 'true', 
+    description: 'Social insurance. Accepts: "true", "false", true, false',
+    type: String
+  })
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  })
   @IsBoolean()
   @IsNotEmpty()
   social_insurance: boolean;
 
-  @ApiProperty({ example: true, description: 'Medical insurance' })
+  @ApiProperty({ 
+    example: 'true', 
+    description: 'Medical insurance. Accepts: "true", "false", true, false',
+    type: String
+  })
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  })
   @IsBoolean()
   @IsNotEmpty()
   medical_insurance: boolean;
@@ -65,15 +85,27 @@ export class CreateUserDto {
   @IsNotEmpty()
   join_date: string;
 
-  @ApiPropertyOptional({ example: '2025-12-31', description: 'Contract date' })
+  @ApiPropertyOptional({ 
+    example: '2025-12-31', 
+    description: 'Contract date (optional). Leave empty or uncheck to send null',
+    required: false,
+    nullable: true
+  })
+  @Transform(({ value }) => value === '' || value === null || value === undefined ? null : value)
   @IsDateString()
   @IsOptional()
-  contract_date?: string;
+  contract_date?: string | null;
 
-  @ApiPropertyOptional({ example: '2026-12-31', description: 'Exit date' })
+  @ApiPropertyOptional({ 
+    example: '2026-12-31', 
+    description: 'Exit date (optional). Leave empty or uncheck to send null',
+    required: false,
+    nullable: true
+  })
+  @Transform(({ value }) => value === '' || value === null || value === undefined ? null : value)
   @IsDateString()
   @IsOptional()
-  exit_date?: string;
+  exit_date?: string | null;
 
   @ApiProperty({ 
     example: 'user', 
@@ -84,39 +116,52 @@ export class CreateUserDto {
   @IsNotEmpty()
   role: 'admin' | 'user';
 
-  @ApiPropertyOptional({ example: 'Software Engineer', description: 'User title' })
+  @ApiPropertyOptional({ 
+    example: 'Software Engineer', 
+    description: 'User title (optional). Leave empty or uncheck to send null',
+    required: false,
+    nullable: true
+  })
+  @Transform(({ value }) => value === '' || value === null || value === undefined ? null : value)
   @IsString()
   @IsOptional()
-  title?: string;
+  title?: string | null;
 
   @ApiPropertyOptional({ 
-    type: [String], 
-    description: 'Personal phone numbers as JSON array',
-    example: ['0145325235', '425235325453']
+    type: [String],
+    description: 'Personal phone numbers as array. Can send as array or JSON string. Leave empty to omit',
+    example: ['0145325235', '425235325453'],
+    required: false,
+    nullable: true
   })
+  @IsOptional()
+  @TransformArray()
   @IsArray()
   @IsString({ each: true })
-  @IsOptional()
   personal_phone?: string[];
 
   @ApiPropertyOptional({ 
-    type: [String], 
-    description: 'Department IDs',
-    example: ['uuid1', 'uuid2']
+    type: String,
+    description: 'Department IDs. Can be: JSON array string ["uuid1", "uuid2"], comma-separated "uuid1,uuid2", or leave empty/uncheck to omit',
+    example: '["uuid1", "uuid2"]',
+    required: false,
+    nullable: true
   })
-  @IsArray()
-  @IsUUID(undefined, { each: true })
   @IsOptional()
+  @TransformArray()
+  @IsArray({ message: 'department_ids must be an array. Use JSON format: ["uuid1", "uuid2"] or comma-separated: "uuid1,uuid2"' })
+  @IsUUID(undefined, { each: true })
   department_ids?: string[];
 
-  @ApiPropertyOptional({ 
-    type: [String], 
-    description: 'Image URLs to associate with the user',
-    example: ['https://example.com/image1.jpg', 'https://example.com/image2.jpg']
+  @ApiPropertyOptional({
+    type: 'array',
+    items: {
+      type: 'string',
+      format: 'binary',
+    },
+    description: 'Attachment files to upload (up to 10 files, max 10MB each). Accepted formats: images (jpg, jpeg, png, gif, webp), documents (pdf, doc, docx, xls, xlsx), text files (txt, html), and more.',
   })
-  @IsArray()
-  @IsString({ each: true })
   @IsOptional()
-  images?: string[];
+  images?: any[];
 }
 

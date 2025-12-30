@@ -1,12 +1,12 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsInt, IsUUID, IsDateString, IsString } from 'class-validator';
+import { IsOptional, IsUUID, IsDateString, IsString } from 'class-validator';
 import { BaseFilterDto } from '../../shared/dto/base-filter.dto';
 
 export class AssetTrackingFilterDto extends BaseFilterDto {
-  @ApiPropertyOptional({ example: 1, description: 'Filter by asset ID' })
-  @IsInt()
+  @ApiPropertyOptional({ example: 'uuid', description: 'Filter by asset ID' })
+  @IsUUID()
   @IsOptional()
-  asset_id?: number;
+  asset_id?: string;
 
   @ApiPropertyOptional({ example: 'uuid', description: 'Filter by user ID' })
   @IsUUID()

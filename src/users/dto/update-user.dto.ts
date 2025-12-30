@@ -1,5 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsBoolean, IsDateString, IsUUID, IsEnum, IsArray, IsOptional } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { TransformArray } from '../../shared/decorators/transform-array.decorator';
 
 export class UpdateUserDto {
   @ApiPropertyOptional({ example: 'EMP001', description: 'User number' })
@@ -62,23 +64,29 @@ export class UpdateUserDto {
   title?: string;
 
   @ApiPropertyOptional({ 
-    type: [String], 
-    description: 'Personal phone numbers as JSON array',
-    example: ['0145325235', '425235325453']
+    type: [String],
+    description: 'Personal phone numbers as array. Can send as array or JSON string. Leave empty to omit',
+    example: ['0145325235', '425235325453'],
+    required: false,
+    nullable: true
   })
+  @IsOptional()
+  @TransformArray()
   @IsArray()
   @IsString({ each: true })
-  @IsOptional()
   personal_phone?: string[];
 
   @ApiPropertyOptional({ 
-    type: [String], 
-    description: 'Department IDs',
-    example: ['uuid1', 'uuid2']
+    type: String,
+    description: 'Department IDs. Can be: JSON array string ["uuid1", "uuid2"], comma-separated "uuid1,uuid2", or leave empty/uncheck to omit',
+    example: '["uuid1", "uuid2"]',
+    required: false,
+    nullable: true
   })
-  @IsArray()
-  @IsUUID(undefined, { each: true })
   @IsOptional()
+  @TransformArray()
+  @IsArray({ message: 'department_ids must be an array. Use JSON format: ["uuid1", "uuid2"] or comma-separated: "uuid1,uuid2"' })
+  @IsUUID(undefined, { each: true })
   department_ids?: string[];
 }
 

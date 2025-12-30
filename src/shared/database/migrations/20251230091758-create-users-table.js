@@ -2,8 +2,8 @@
 
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
-  async up (queryInterface, Sequelize) {
-    // Create enum type for work_location
+  async up(queryInterface, Sequelize) {
+    // Create work_location enum type
     await queryInterface.sequelize.query(`
       DO $$ BEGIN
         CREATE TYPE work_location_enum AS ENUM ('in-office', 'hybrid', 'remote');
@@ -14,76 +14,99 @@ module.exports = {
 
     await queryInterface.createTable('users', {
       id: {
-        allowNull: false,
-        primaryKey: true,
         type: Sequelize.UUID,
+        primaryKey: true,
         defaultValue: Sequelize.literal('gen_random_uuid()'),
+        allowNull: false,
       },
       user_number: {
         type: Sequelize.STRING(255),
         allowNull: false,
-        unique: true
+        unique: true,
+      },
+      username: {
+        type: Sequelize.STRING(255),
+        allowNull: true,
+        unique: true,
+      },
+      password: {
+        type: Sequelize.STRING(255),
+        allowNull: true,
       },
       name: {
         type: Sequelize.STRING(255),
-        allowNull: false
+        allowNull: false,
       },
       address: {
         type: Sequelize.STRING(500),
-        allowNull: false
+        allowNull: false,
       },
       work_location: {
         type: Sequelize.ENUM('in-office', 'hybrid', 'remote'),
-        allowNull: false
+        allowNull: false,
       },
       social_insurance: {
         type: Sequelize.BOOLEAN,
-        allowNull: false
+        allowNull: false,
       },
       medical_insurance: {
         type: Sequelize.BOOLEAN,
-        allowNull: false
+        allowNull: false,
       },
       join_date: {
         type: Sequelize.DATEONLY,
-        allowNull: false
+        allowNull: false,
       },
       contract_date: {
         type: Sequelize.DATEONLY,
-        allowNull: true
+        allowNull: true,
       },
       exit_date: {
         type: Sequelize.DATEONLY,
-        allowNull: true
+        allowNull: true,
       },
       role_id: {
         type: Sequelize.UUID,
         allowNull: false,
         references: {
           model: 'roles',
-          key: 'id'
+          key: 'id',
         },
         onUpdate: 'CASCADE',
-        onDelete: 'RESTRICT'
+        onDelete: 'RESTRICT',
+      },
+      title: {
+        type: Sequelize.STRING(255),
+        allowNull: true,
+      },
+      personal_phone: {
+        type: Sequelize.ARRAY(Sequelize.TEXT),
+        allowNull: true,
       },
       deletedAt: {
         type: Sequelize.DATE,
-        allowNull: true
+        allowNull: true,
+      },
+      is_active: {
+        type: Sequelize.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
       },
       createdAt: {
         allowNull: false,
-        type: Sequelize.DATE
+        type: Sequelize.DATE,
+        defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
       },
       updatedAt: {
         allowNull: false,
-        type: Sequelize.DATE
-      }
+        type: Sequelize.DATE,
+        defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
+      },
     });
   },
 
-  async down (queryInterface, Sequelize) {
+  async down(queryInterface, Sequelize) {
     await queryInterface.dropTable('users');
-    // Drop enum type
-    await queryInterface.sequelize.query('DROP TYPE IF EXISTS work_location_enum;');
+    await queryInterface.sequelize.query('DROP TYPE IF EXISTS work_location_enum');
   }
 };

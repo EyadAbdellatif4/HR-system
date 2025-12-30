@@ -2,7 +2,7 @@
 
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
-  async up (queryInterface, Sequelize) {
+  async up(queryInterface, Sequelize) {
     await queryInterface.bulkInsert('roles', [
       {
         id: Sequelize.literal('gen_random_uuid()'),
@@ -23,7 +23,12 @@ module.exports = {
     ], {});
   },
 
-  async down (queryInterface, Sequelize) {
-    await queryInterface.bulkDelete('roles', null, {});
+  async down(queryInterface, Sequelize) {
+    const { Op } = Sequelize;
+    await queryInterface.bulkDelete('roles', {
+      name: {
+        [Op.in]: ['admin', 'user']
+      }
+    }, {});
   }
 };

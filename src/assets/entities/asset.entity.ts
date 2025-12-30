@@ -11,6 +11,7 @@ import {
 import { DataType } from 'sequelize-typescript';
 import { User } from '../../users/entities/user.entity';
 import { AssetTracking } from '../../asset-tracking/entities/asset-tracking.entity';
+import { Attachment } from '../../shared/database/entities/attachment.entity';
 import { ApiProperty } from '@nestjs/swagger';
 
 @Table({
@@ -19,10 +20,10 @@ import { ApiProperty } from '@nestjs/swagger';
 })
 export class Asset extends Model<Asset> {
   @PrimaryKey
-  @AutoIncrement
-  @Column(DataType.INTEGER)
-  @ApiProperty({ example: 1, description: 'The ID of the asset' })
-  declare id: number;
+  @Default(DataType.UUIDV4)
+  @Column(DataType.UUID)
+  @ApiProperty({ example: 'uuid', description: 'The ID of the asset' })
+  declare id: string;
 
   @Column({
     type: 'VARCHAR(255)',
@@ -196,5 +197,16 @@ export class Asset extends Model<Asset> {
   @BelongsToMany(() => User, () => AssetTracking, 'asset_id', 'user_id')
   @ApiProperty({ example: true, description: 'The users assigned to this asset' })
   users: User[];
+
+  @HasMany(() => Attachment, {
+    foreignKey: 'entity_id',
+    constraints: false,
+    scope: {
+      entity_type: 'assets',
+    },
+    as: 'attachments',
+  })
+  @ApiProperty({ example: true, description: 'The attachments associated with this asset' })
+  attachments: Attachment[];
 }
 

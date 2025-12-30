@@ -7,6 +7,8 @@ import { CreateAssetDto } from './dto/create-asset.dto';
 import { UpdateAssetDto } from './dto/update-asset.dto';
 import { AssetFilterDto } from './dto/asset-filter.dto';
 import { Asset } from './entities/asset.entity';
+import { Attachment } from '../shared/database/entities/attachment.entity';
+import { AttachmentUploadService } from '../shared/storage/attachment-upload.service';
 import { InjectModel } from '@nestjs/sequelize';
 import { Op } from 'sequelize';
 import { buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
@@ -17,18 +19,36 @@ export class AssetsService {
   constructor(
     @InjectModel(Asset)
     private assetRepository: typeof Asset,
+    private attachmentUploadService: AttachmentUploadService,
   ) {}
 
   /**
    * Create a new asset
-   * Optimized: Single insert query
+   * Optimized: Single insert query, parallel image upload
    */
-  async create(createAssetDto: CreateAssetDto) {
+  async create(createAssetDto: CreateAssetDto, files?: Express.Multer.File[]) {
     const asset = await this.assetRepository.create(createAssetDto as any);
+
+    // Upload and save attachments if provided
+    if (files && files.length > 0) {
+      await this.attachmentUploadService.uploadAndSaveAttachments(files, asset.id, 'assets');
+    }
+
+    // Reload asset with attachments
+    const createdAsset = await this.assetRepository.findByPk(asset.id, {
+      include: [
+        { 
+          model: Attachment, 
+          as: 'attachments', 
+          attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
+          required: false,
+        },
+      ],
+    });
 
     return {
       message: 'Asset created successfully',
-      asset,
+      asset: createdAsset,
     };
   }
 
@@ -97,12 +117,21 @@ export class AssetsService {
         filterDto?.sortOrder || 'DESC'
       );
 
-      // Single optimized query
+      // Single optimized query with attachments
       const { rows: assets, count: total } = await this.assetRepository.findAndCountAll({
         where,
+        include: [
+          { 
+            model: Attachment, 
+            as: 'attachments', 
+            attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
+            required: false,
+          },
+        ],
         order: order || [['createdAt', 'DESC']],
         limit,
         offset,
+        distinct: true, // Important for count with joins
       });
 
       const pagination = getPaginationMetadata(total, page, limit);
@@ -129,16 +158,25 @@ export class AssetsService {
    * Get an asset by ID
    * Optimized: Single query
    */
-  async findOne(id: number) {
-    if (!id || isNaN(id) || id <= 0) {
+  async findOne(id: string) {
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
       throw new BadRequestException({
-        message: 'Invalid asset ID. Must be a positive number.',
+        message: 'Invalid asset ID format. Expected UUID format.',
         error: 'Bad Request',
         statusCode: 400,
       });
     }
 
-    const asset = await this.assetRepository.findByPk(id);
+    const asset = await this.assetRepository.findByPk(id, {
+      include: [
+        { 
+          model: Attachment, 
+          as: 'attachments', 
+          attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
+          required: false,
+        },
+      ],
+    });
 
     if (!asset) {
       throw new NotFoundException({
@@ -158,10 +196,10 @@ export class AssetsService {
    * Update an asset
    * Optimized: Single update query, then fetch
    */
-  async update(id: number, updateAssetDto: UpdateAssetDto) {
-    if (!id || isNaN(id) || id <= 0) {
+  async update(id: string, updateAssetDto: UpdateAssetDto) {
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
       throw new BadRequestException({
-        message: 'Invalid asset ID. Must be a positive number.',
+        message: 'Invalid asset ID format. Expected UUID format.',
         error: 'Bad Request',
         statusCode: 400,
       });
@@ -198,10 +236,10 @@ export class AssetsService {
    * Soft delete an asset
    * Optimized: Single update query
    */
-  async remove(id: number) {
-    if (!id || isNaN(id) || id <= 0) {
+  async remove(id: string) {
+    if (!id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
       throw new BadRequestException({
-        message: 'Invalid asset ID. Must be a positive number.',
+        message: 'Invalid asset ID format. Expected UUID format.',
         error: 'Bad Request',
         statusCode: 400,
       });

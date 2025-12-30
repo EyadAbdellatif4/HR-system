@@ -15,7 +15,11 @@ async function bootstrap() {
       transform: true,
       transformOptions: {
         enableImplicitConversion: true,
+        exposeDefaultValues: true,
       },
+      skipMissingProperties: false,
+      skipNullProperties: false,
+      skipUndefinedProperties: false,
       exceptionFactory: (errors) => {
         const messages = errors.map((error) => {
           if (error.constraints) {

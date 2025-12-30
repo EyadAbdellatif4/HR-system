@@ -118,5 +118,16 @@ export class CreateAssetDto {
   @IsString()
   @IsOptional()
   details?: string;
+
+  @ApiPropertyOptional({
+    type: 'array',
+    items: {
+      type: 'string',
+      format: 'binary',
+    },
+    description: 'Attachment files to upload (up to 10 files, max 10MB each). Accepted formats: images (jpg, jpeg, png, gif, webp), documents (pdf, doc, docx, xls, xlsx), text files (txt, html), and more.',
+  })
+  @IsOptional()
+  images?: any[];
 }
 

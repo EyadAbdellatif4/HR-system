@@ -2,40 +2,42 @@
 
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
-  async up (queryInterface, Sequelize) {
-    await queryInterface.createTable('titles', {
+  async up(queryInterface, Sequelize) {
+    await queryInterface.createTable('departments', {
       id: {
-        allowNull: false,
-        primaryKey: true,
         type: Sequelize.UUID,
+        primaryKey: true,
         defaultValue: Sequelize.literal('gen_random_uuid()'),
+        allowNull: false,
       },
       name: {
         type: Sequelize.STRING(255),
         allowNull: false,
-        unique: true
+        unique: true,
       },
       is_active: {
         type: Sequelize.BOOLEAN,
         allowNull: false,
-        defaultValue: true
+        defaultValue: true,
       },
       deletedAt: {
         type: Sequelize.DATE,
-        allowNull: true
+        allowNull: true,
       },
       createdAt: {
         allowNull: false,
-        type: Sequelize.DATE
+        type: Sequelize.DATE,
+        defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
       },
       updatedAt: {
         allowNull: false,
-        type: Sequelize.DATE
-      }
+        type: Sequelize.DATE,
+        defaultValue: Sequelize.literal('CURRENT_TIMESTAMP'),
+      },
     });
   },
 
-  async down (queryInterface, Sequelize) {
-    await queryInterface.dropTable('titles');
+  async down(queryInterface, Sequelize) {
+    await queryInterface.dropTable('departments');
   }
 };

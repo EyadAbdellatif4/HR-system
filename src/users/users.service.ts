@@ -14,7 +14,8 @@ import { buildWhereClause, buildDateRangeClause, buildOrderClause, buildSearchCl
 import { calculateOffset, getPaginationParams, getPaginationMetadata } from '../shared/utils/pagination.util';
 import { Role } from '../role/entities/role.entity';
 import { Department } from '../departments/entities/department.entity';
-import { Image } from '../shared/database/entities/image.entity';
+import { Attachment } from '../shared/database/entities/attachment.entity';
+import { AttachmentUploadService } from '../shared/storage/attachment-upload.service';
 import { RoleName } from '../shared/enums';
 import * as crypto from 'crypto';
 
@@ -25,9 +26,9 @@ const getUserIncludes = () => [
   { model: Role, as: 'role', attributes: ['id', 'name'] },
   { model: Department, as: 'departments', attributes: ['id', 'name'], through: { attributes: [] } },
   { 
-    model: Image, 
-    as: 'images', 
-    attributes: ['id', 'image_url', 'owner_type', 'created_at'],
+    model: Attachment, 
+    as: 'attachments', 
+    attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
     required: false,
   },
 ];
@@ -39,16 +40,18 @@ export class UsersService {
     private userRepository: typeof User,
     @InjectModel(Role)
     private roleRepository: typeof Role,
-    @InjectModel(Image)
-    private imageRepository: typeof Image,
+    private attachmentUploadService: AttachmentUploadService,
   ) {}
 
   /**
    * Create a new user
    * Optimized: Parallel validation queries, single user creation, batch department association
    */
-  async create(createUserDto: CreateUserDto) {
-    const { department_ids, role, password, images, ...userData } = createUserDto;
+  async create(createUserDto: CreateUserDto, files?: Express.Multer.File[]) {
+    const { department_ids, role, password, personal_phone, ...userData } = createUserDto;
+    
+    // Handle empty arrays - convert to undefined if empty
+    const processedDepartmentIds = department_ids && department_ids.length > 0 ? department_ids : undefined;
 
     // Parallel validation: check user_number, username uniqueness, and get role
     const [existingUserByNumber, existingUserByUsername, userRole] = await Promise.all([
@@ -91,14 +94,14 @@ export class UsersService {
     }
 
     // Verify departments exist if provided
-    if (department_ids && department_ids.length > 0) {
+    if (processedDepartmentIds && processedDepartmentIds.length > 0) {
       const existingDepartments = await Department.findAll({
-        where: { id: department_ids },
+        where: { id: processedDepartmentIds },
         attributes: ['id'],
       });
-      if (existingDepartments.length !== department_ids.length) {
+      if (existingDepartments.length !== processedDepartmentIds.length) {
         const foundIds = existingDepartments.map(d => d.id);
-        const missingIds = department_ids.filter(id => !foundIds.includes(id));
+        const missingIds = processedDepartmentIds.filter(id => !foundIds.includes(id));
         throw new NotFoundException({
           message: `Department(s) not found: ${missingIds.join(', ')}`,
           error: 'Not Found',
@@ -115,6 +118,7 @@ export class UsersService {
       ...userData,
       password: hashedPassword,
       role_id: userRole.id,
+      personal_phone: personal_phone && personal_phone.length > 0 ? personal_phone : null,
       join_date: userData.join_date ? new Date(userData.join_date) : undefined,
       contract_date: userData.contract_date ? new Date(userData.contract_date) : undefined,
       exit_date: userData.exit_date ? new Date(userData.exit_date) : undefined,
@@ -124,18 +128,13 @@ export class UsersService {
     const user = await this.userRepository.create(userDataWithDates as any);
 
     // Associate departments if provided (batch operation)
-    if (department_ids && department_ids.length > 0) {
-      await user.$set('departments', department_ids);
+    if (processedDepartmentIds && processedDepartmentIds.length > 0) {
+      await user.$set('departments', processedDepartmentIds);
     }
 
-    // Create images if provided
-    if (images && images.length > 0) {
-      const imageRecords = images.map(imageUrl => ({
-        owner_id: user.id, // Use UUID string directly
-        owner_type: 'user' as const,
-        image_url: imageUrl,
-      })) as any;
-      await this.imageRepository.bulkCreate(imageRecords);
+    // Upload and save attachments if provided
+    if (files && files.length > 0) {
+      await this.attachmentUploadService.uploadAndSaveAttachments(files, user.id, 'users');
     }
 
     // Reload user with relations in a single query (exclude password from response)

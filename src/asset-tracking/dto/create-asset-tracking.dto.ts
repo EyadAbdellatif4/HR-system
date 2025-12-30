@@ -1,11 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsNotEmpty, IsUUID, IsDateString, IsOptional } from 'class-validator';
+import { IsNotEmpty, IsUUID, IsDateString, IsOptional } from 'class-validator';
 
 export class CreateAssetTrackingDto {
-  @ApiProperty({ example: 1, description: 'Asset ID' })
-  @IsInt()
+  @ApiProperty({ example: 'uuid', description: 'Asset ID' })
+  @IsUUID()
   @IsNotEmpty()
-  asset_id: number;
+  asset_id: string;
 
   @ApiProperty({ example: 'uuid', description: 'User ID' })
   @IsUUID()

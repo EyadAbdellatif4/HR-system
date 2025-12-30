@@ -21,20 +21,24 @@
     "db:generate": "sequelize-cli migration:generate --name",
     "db:migrate": "sequelize-cli db:migrate",
     "db:migrate:undo": "sequelize-cli db:migrate:undo",
-    "db:migrate:undo:all": "sequelize-cli db:migrate:undo:all"
+    "db:migrate:undo:all": "sequelize-cli db:migrate:undo:all",
+    "db:seed:all": "sequelize-cli db:seed:all"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.18.0",
     "@nestjs/common": "^10.0.0",
-    "@nestjs/core": "^10.0.0",
     "@nestjs/config": "^3.0.0",
+    "@nestjs/core": "^10.0.0",
     "@nestjs/jwt": "^10.0.0",
     "@nestjs/passport": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
     "@nestjs/sequelize": "^10.0.0",
     "@nestjs/swagger": "^7.0.0",
     "@nestjs/throttler": "^5.0.0",
+    "@types/multer": "^2.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.0",
+    "multer": "^2.0.2",
     "pg": "^8.11.0",
     "pg-hstore": "^2.3.4",
     "reflect-metadata": "^0.1.13",
@@ -84,4 +88,3 @@
     "testEnvironment": "node"
   }
 }
-

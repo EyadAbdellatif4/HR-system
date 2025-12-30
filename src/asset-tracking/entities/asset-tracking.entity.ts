@@ -25,11 +25,11 @@ export class AssetTracking extends Model<AssetTracking> {
 
   @ForeignKey(() => Asset)
   @Column({
-    type: DataType.INTEGER,
+    type: DataType.UUID,
     allowNull: false,
   })
-  @ApiProperty({ example: 1, description: 'The ID of the asset' })
-  declare asset_id: number;
+  @ApiProperty({ example: 'uuid', description: 'The ID of the asset' })
+  declare asset_id: string;
 
   @ForeignKey(() => User)
   @Column({

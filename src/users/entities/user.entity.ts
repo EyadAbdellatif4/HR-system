@@ -15,7 +15,7 @@ import { Department } from '../../departments/entities/department.entity';
 import { UserDepartment } from '../../shared/database/entities/user-department.entity';
 import { Asset } from '../../assets/entities/asset.entity';
 import { AssetTracking } from '../../asset-tracking/entities/asset-tracking.entity';
-import { Image } from '../../shared/database/entities/image.entity';
+import { Attachment } from '../../shared/database/entities/attachment.entity';
 import { ApiProperty } from '@nestjs/swagger';
 
 /**
@@ -131,12 +131,13 @@ export class User extends Model<User> {
   declare title: string | null;
 
   @Column({
-    type: DataType.JSONB,
+    type: DataType.ARRAY(DataType.TEXT),
     allowNull: true,
   })
   @ApiProperty({ 
     example: ['0145325235', '425235325453'], 
-    description: 'Personal phone numbers as JSON array' 
+    description: 'Personal phone numbers as array',
+    type: [String]
   })
   declare personal_phone: string[] | null;
 
@@ -171,15 +172,15 @@ export class User extends Model<User> {
   @ApiProperty({ example: true, description: 'The assets assigned to this user' })
   assets: Asset[];
 
-  @HasMany(() => Image, {
-    foreignKey: 'owner_id',
+  @HasMany(() => Attachment, {
+    foreignKey: 'entity_id',
     constraints: false,
     scope: {
-      owner_type: 'user',
+      entity_type: 'users',
     },
-    as: 'images',
+    as: 'attachments',
   })
-  @ApiProperty({ example: true, description: 'The images associated with this user' })
-  images: Image[];
+  @ApiProperty({ example: true, description: 'The attachments associated with this user' })
+  attachments: Attachment[];
 }
 

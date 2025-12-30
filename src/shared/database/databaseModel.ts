@@ -4,8 +4,8 @@ import { Department } from '../../departments/entities/department.entity';
 import { UserDepartment } from './entities/user-department.entity';
 import { Asset } from '../../assets/entities/asset.entity';
 import { AssetTracking } from '../../asset-tracking/entities/asset-tracking.entity';
-import { Image } from './entities/image.entity';
+import { Attachment } from './entities/attachment.entity';
 
 export default () => {
-  return [User, Role, Department, UserDepartment, Asset, AssetTracking, Image];
+  return [User, Role, Department, UserDepartment, Asset, AssetTracking, Attachment];
 };
