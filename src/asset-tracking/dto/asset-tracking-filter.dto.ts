@@ -3,12 +3,18 @@ import { IsOptional, IsUUID, IsDateString, IsString } from 'class-validator';
 import { BaseFilterDto } from '../../shared/dto/base-filter.dto';
 
 export class AssetTrackingFilterDto extends BaseFilterDto {
-  @ApiPropertyOptional({ example: 'uuid', description: 'Filter by asset ID' })
+  @ApiPropertyOptional({ 
+    example: '6ff43431-1516-4c36-85ef-4e14b2ab4dc4', 
+    description: 'Filter by asset ID' 
+  })
   @IsUUID()
   @IsOptional()
   asset_id?: string;
 
-  @ApiPropertyOptional({ example: 'uuid', description: 'Filter by user ID' })
+  @ApiPropertyOptional({ 
+    example: '60483f66-bab3-442b-a3ca-bbf89943cbb5', 
+    description: 'Filter by user ID' 
+  })
   @IsUUID()
   @IsOptional()
   user_id?: string;

@@ -52,16 +52,14 @@ export class CreateUserDto {
   @IsNotEmpty()
   work_location: WorkLocation;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: 'true', type: String })
   @TransformBoolean()
-  @IsBoolean()
-  @IsNotEmpty()
+  @IsBoolean({ message: ErrorMessage.SOCIAL_INSURANCE_MUST_BE_BOOLEAN })
   social_insurance: boolean;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: 'true', type: String })
   @TransformBoolean()
-  @IsBoolean()
-  @IsNotEmpty()
+  @IsBoolean({ message: ErrorMessage.MEDICAL_INSURANCE_MUST_BE_BOOLEAN })
   medical_insurance: boolean;
 
   @ApiProperty({ example: '2025-01-01' })

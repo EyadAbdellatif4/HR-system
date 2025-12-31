@@ -13,6 +13,7 @@ import { Op } from 'sequelize';
 import * as crypto from 'crypto';
 import { Role } from '../role/entities/role.entity';
 import { RoleName, ResponseMessage, ErrorMessage } from '../shared/enums';
+import { hashPassword, verifyPassword } from '../shared/utils/password.util';
 
 /**
  * AuthService is a service that provides methods to manage authentication
@@ -119,8 +120,7 @@ export class AuthService {
       }
     }
 
-    // Hash password using SHA-256
-    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+    const hashedPassword = await hashPassword(password);
 
     // Create new user
     const newUser = await this.userRepository.create({
@@ -211,9 +211,27 @@ export class AuthService {
       });
     }
 
-    // Verify password
-    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-    if (user.password !== hashedPassword) {
+    // Verify password - support both bcrypt (new) and SHA-256 (legacy) for backward compatibility
+    if (!user.password) {
+      throw new UnauthorizedException({
+        message: ErrorMessage.INVALID_CREDENTIALS,
+        error: 'Unauthorized',
+        statusCode: 401,
+      });
+    }
+
+    const isBcryptHash = user.password.startsWith('$2');
+    let passwordValid = false;
+    
+    if (isBcryptHash) {
+      passwordValid = await verifyPassword(password, user.password);
+    } else {
+      // Legacy SHA-256 support for existing users
+      const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
+      passwordValid = user.password === hashedPassword;
+    }
+    
+    if (!passwordValid) {
       throw new UnauthorizedException({
         message: ErrorMessage.INVALID_CREDENTIALS,
         error: 'Unauthorized',

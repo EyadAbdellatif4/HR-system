@@ -12,13 +12,19 @@ const TransformEmptyToUndefined = () => Transform(({ value }) =>
 );
 
 export class UpdateAssetTrackingDto {
-  @ApiPropertyOptional({ example: 'uuid', description: 'Asset ID' })
+  @ApiPropertyOptional({ 
+    example: '6ff43431-1516-4c36-85ef-4e14b2ab4dc4', 
+    description: 'Asset ID' 
+  })
   @TransformEmptyToUndefined()
   @IsUUID()
   @IsOptional()
   asset_id?: string;
 
-  @ApiPropertyOptional({ example: 'uuid', description: 'User ID' })
+  @ApiPropertyOptional({ 
+    example: '60483f66-bab3-442b-a3ca-bbf89943cbb5', 
+    description: 'User ID' 
+  })
   @TransformEmptyToUndefined()
   @IsUUID()
   @IsOptional()

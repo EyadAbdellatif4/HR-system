@@ -51,6 +51,7 @@ export class UsersController {
     @Body(ValidationPipe) createUserDto: CreateUserDto,
     @UploadedFiles() files?: Express.Multer.File[],
   ) {
+    console.log(createUserDto, "createUserDto");
     return this.usersService.create(createUserDto, files);
   }
 

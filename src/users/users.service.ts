@@ -9,45 +9,22 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { UserFilterDto } from './dto/user-filter.dto';
 import { User } from './entities/user.entity';
 import { InjectModel, InjectConnection } from '@nestjs/sequelize';
-import { Op, Sequelize, Transaction } from 'sequelize';
-import { buildWhereClause, buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
+import { Op, Sequelize } from 'sequelize';
+import { buildDateRangeClause, buildOrderClause, buildSearchClause } from '../shared/utils/filter.util';
 import { calculateOffset, getPaginationParams, getPaginationMetadata } from '../shared/utils/pagination.util';
 import { Role } from '../role/entities/role.entity';
 import { Department } from '../departments/entities/department.entity';
-import { Attachment } from '../shared/database/entities/attachment.entity';
 import { UserDepartment } from '../shared/database/entities/user-department.entity';
 import { AttachmentUploadService } from '../shared/storage/attachment-upload.service';
-import { RoleName } from '../shared/enums';
-import * as crypto from 'crypto';
+import { getEntityAttachments, getBatchEntityAttachments } from '../shared/utils/attachment.util';
+import { softDeleteEntityAttachments } from '../shared/utils/soft-delete.util';
+import { hashPassword } from '../shared/utils/password.util';
+import { withTransaction } from '../shared/utils/transaction.util';
 
-/**
- * Common includes for user queries to avoid repetition
- * Note: Attachments are fetched separately due to polymorphic relationship
- */
 const getUserIncludes = () => [
   { model: Role, as: 'role', attributes: ['id', 'name'] },
   { model: Department, as: 'departments', attributes: ['id', 'name'], through: { attributes: [] } },
 ];
-
-/**
- * Fetch attachments for a user (separate query for polymorphic relationship)
- * Time Complexity: O(1) - indexed lookup on entity_id and entity_type
- */
-async function getUserAttachments(userId: string): Promise<Attachment[]> {
-  return await Attachment.findAll({
-    where: {
-      entity_id: userId, // entity_id is VARCHAR, userId is UUID string - PostgreSQL handles conversion
-      entity_type: 'users',
-      is_active: true,
-      [Op.and]: [
-        Sequelize.literal('deleted_at IS NULL'),
-      ],
-    } as any,
-    attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at'],
-    order: [['created_at', 'DESC']],
-    paranoid: false, // We're handling deleted_at manually
-  });
-}
 
 @Injectable()
 export class UsersService {
@@ -61,291 +38,39 @@ export class UsersService {
     private attachmentUploadService: AttachmentUploadService,
   ) {}
 
-  /**
-   * Create a new user
-   * Optimized: O(1) validations, single transaction, batch operations
-   * Time Complexity: O(1) for validations, O(n) for department associations where n = number of departments
-   */
   async create(createUserDto: CreateUserDto, files?: Express.Multer.File[]) {
     const { department_ids, role, password, personal_phone, ...userData } = createUserDto;
-    
-    // Normalize department_ids: undefined if empty array
     const departmentIds = department_ids && department_ids.length > 0 ? department_ids : undefined;
 
-    // Start transaction for atomicity
-    const transaction = await this.sequelize.transaction();
+    return withTransaction(this.sequelize, async (transaction) => {
+      await this.validateUserUniqueness(userData.user_number, userData.username, transaction);
+      const userRole = await this.validateRole(role, transaction);
+      await this.validateDepartments(departmentIds, transaction);
 
-    try {
-      // Parallel validations: O(1) - all use indexed lookups
-      const [existingUserByNumber, existingUserByUsername, userRole] = await Promise.all([
-        this.userRepository.findOne({
-          where: { user_number: userData.user_number },
-          attributes: ['id'],
-          transaction,
-        }),
-        this.userRepository.findOne({
-          where: { username: userData.username },
-          attributes: ['id'],
-          transaction,
-        }),
-        this.roleRepository.findOne({
-          where: { name: role },
-          attributes: ['id', 'name'],
-          transaction,
-        }),
-      ]);
+      const normalizedData = await this.normalizeUserData(userData, password, personal_phone, userRole.id);
+      const user = await this.userRepository.create(normalizedData as any, { transaction });
 
-      // Early validation failures - O(1)
-      if (existingUserByNumber) {
-        await transaction.rollback();
-        throw new ConflictException({
-          message: 'User with this user number already exists',
-          error: 'Conflict',
-          statusCode: 409,
-        });
-      }
-
-      if (existingUserByUsername) {
-        await transaction.rollback();
-        throw new ConflictException({
-          message: 'User with this username already exists',
-          error: 'Conflict',
-          statusCode: 409,
-        });
-      }
-
-      if (!userRole) {
-        await transaction.rollback();
-        throw new NotFoundException({
-          message: `Role '${role}' not found. Available roles: admin, user`,
-          error: 'Not Found',
-          statusCode: 404,
-        });
-      }
-
-      // Validate departments if provided: O(n) where n = number of department_ids
-      // Use Sequelize.where with cast to ensure proper UUID type handling in PostgreSQL
       if (departmentIds && departmentIds.length > 0) {
-        // Cast each UUID string to UUID type using Sequelize.cast
-        // UUIDs are validated by DTO @IsUUID decorator
-        const existingDepartments = await Department.findAll({
-          where: {
-            id: {
-              [Op.in]: departmentIds.map(id => 
-                Sequelize.cast(id, 'UUID')
-              )
-            },
-            is_active: true,
-          },
-          attributes: ['id'],
-          transaction,
-        });
-        
-        // O(n) comparison - but n is typically small (< 10)
-        if (existingDepartments.length !== departmentIds.length) {
-          await transaction.rollback();
-          const foundIdsSet = new Set(existingDepartments.map(d => d.id));
-          const missingIds = departmentIds.filter(id => !foundIdsSet.has(id));
-          throw new NotFoundException({
-            message: `Department(s) not found: ${missingIds.join(', ')}`,
-            error: 'Not Found',
-            statusCode: 404,
-          });
-        }
+        await this.createUserDepartments(user.id, departmentIds, transaction);
       }
 
-      // Hash password: O(1)
-      const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-
-      // Ensure boolean values are properly converted (handle formData string values)
-      const socialInsurance = typeof userData.social_insurance === 'boolean' 
-        ? userData.social_insurance 
-        : (userData.social_insurance === 'true' || userData.social_insurance === '1');
-      const medicalInsurance = typeof userData.medical_insurance === 'boolean'
-        ? userData.medical_insurance
-        : (userData.medical_insurance === 'true' || userData.medical_insurance === '1');
-
-      // Prepare user data: O(1)
-      const userDataWithDates = {
-        ...userData,
-        password: hashedPassword,
-        role_id: userRole.id,
-        personal_phone: personal_phone && personal_phone.length > 0 ? personal_phone : null,
-        social_insurance: socialInsurance,
-        medical_insurance: medicalInsurance,
-        join_date: userData.join_date ? new Date(userData.join_date) : undefined,
-        contract_date: userData.contract_date ? new Date(userData.contract_date) : undefined,
-        exit_date: userData.exit_date ? new Date(userData.exit_date) : undefined,
-      };
-
-      // Create user: O(1)
-      const user = await this.userRepository.create(userDataWithDates as any, { transaction });
-
-      // Batch create department associations: O(n) where n = number of departments
-      if (departmentIds && departmentIds.length > 0) {
-        const userDepartmentRecords = departmentIds.map(deptId => ({
-          user_id: user.id,
-          department_id: deptId,
-        }));
-        await UserDepartment.bulkCreate(userDepartmentRecords as any, { transaction });
-      }
-
-      // Commit transaction: O(1)
-      await transaction.commit();
-
-      // File uploads (non-blocking, outside transaction): O(m) where m = number of files
       if (files && files.length > 0) {
-        try {
-          const savedAttachments = await this.attachmentUploadService.uploadAndSaveAttachments(files, user.id, 'users');
-          if (!savedAttachments || savedAttachments.length === 0) {
-            console.error('Warning: Files uploaded but no attachment records created');
-          }
-        } catch (fileError) {
-          console.error('File upload/attachment save failed:', fileError);
-          // Don't throw - user is already created, just log the error
-        }
+        await this.handleFileUploads(files, user.id);
       }
 
-      // Fetch user with relations: O(1) with proper indexes
-      const createdUser = await this.userRepository.findByPk(user.id, {
-        include: getUserIncludes(),
-        attributes: { exclude: ['password'] },
-      });
-
-      // Fetch attachments separately (polymorphic relationship): O(1)
-      const attachments = await getUserAttachments(user.id);
-      
-      // Convert user to plain object and attach attachments for proper serialization
-      const userResponse = createdUser ? createdUser.toJSON() : null;
-      if (userResponse) {
-        userResponse.attachments = attachments.map(att => att.toJSON());
-      }
-
-      return {
-        message: 'User created successfully',
-        user: userResponse,
-      };
-    } catch (error) {
-      // Rollback on any error
-      try {
-        await transaction.rollback();
-      } catch (rollbackError) {
-        // Ignore rollback errors
-      }
-      throw error;
-    }
+      return this.buildUserResponse(user.id);
+    });
   }
 
-  /**
-   * Get all users with optional filtering
-   * Optimized: Single query with proper includes, distinct count
-   */
   async findAll(filterDto?: UserFilterDto) {
     try {
       const { page, limit } = getPaginationParams(filterDto?.page, filterDto?.limit);
       const offset = calculateOffset(page, limit);
 
-      const where: any = {};
+      const where = await this.buildUserWhereClause(filterDto);
+      const include = this.buildUserIncludes(filterDto?.department_id);
+      const order = buildOrderClause(filterDto?.sortBy || 'createdAt', filterDto?.sortOrder || 'DESC');
 
-      // Get role_id if role filter is provided (optimized: single query upfront)
-      let roleIdForFilter: string | null = null;
-      if (filterDto?.role) {
-        const role = await this.roleRepository.findOne({
-          where: { name: filterDto.role, is_active: true },
-          attributes: ['id'],
-        });
-        if (!role) {
-          // If role doesn't exist, return empty result immediately
-          return {
-            message: 'Users retrieved successfully',
-            users: [],
-            count: 0,
-            total: 0,
-            page: 1,
-            limit,
-            totalPages: 0,
-          };
-        }
-        roleIdForFilter = role.id;
-      }
-
-      // Apply filters (optimized: build where clause efficiently)
-      if (filterDto?.user_number) {
-        where.user_number = { [Op.iLike]: `%${filterDto.user_number}%` };
-      }
-
-      if (filterDto?.name) {
-        where.name = { [Op.iLike]: `%${filterDto.name}%` };
-      }
-
-      if (filterDto?.work_location) {
-        where.work_location = filterDto.work_location;
-      }
-
-      // Boolean filters - TransformBoolean decorator should handle conversion
-      if (filterDto?.social_insurance !== undefined && filterDto?.social_insurance !== null) {
-        where.social_insurance = filterDto.social_insurance;
-      }
-
-      if (filterDto?.medical_insurance !== undefined && filterDto?.medical_insurance !== null) {
-        where.medical_insurance = filterDto.medical_insurance;
-      }
-
-      // Role filter - use pre-fetched role_id
-      if (roleIdForFilter) {
-        where.role_id = roleIdForFilter;
-      }
-
-      if (filterDto?.title) {
-        where.title = { [Op.iLike]: `%${filterDto.title}%` };
-      }
-
-      // Apply general search
-      if (filterDto?.search) {
-        const searchWhere = buildSearchClause(filterDto.search, ['user_number', 'name', 'address', 'title']);
-        if (searchWhere) {
-          Object.assign(where, searchWhere);
-        }
-      }
-
-      // Apply join date range
-      if (filterDto?.joinDateFrom || filterDto?.joinDateTo) {
-        const dateRangeWhere = buildDateRangeClause(
-          filterDto.joinDateFrom,
-          filterDto.joinDateTo,
-          'join_date'
-        );
-        if (dateRangeWhere) {
-          Object.assign(where, dateRangeWhere);
-        }
-      }
-
-      // Build order clause
-      const order = buildOrderClause(
-        filterDto?.sortBy || 'createdAt',
-        filterDto?.sortOrder || 'DESC'
-      );
-
-      // Department filter (requires join)
-      let include: any[] = getUserIncludes();
-      if (filterDto?.department_id) {
-        include = [
-          { model: Role, as: 'role', attributes: ['id', 'name'] },
-          {
-            model: Department,
-            as: 'departments',
-            where: { id: filterDto.department_id },
-            required: true,
-            attributes: ['id', 'name'],
-            through: { attributes: [] },
-          },
-        ];
-      }
-
-      // Always filter by is_active = true
-      where.is_active = true;
-
-      // Single optimized query with all includes (exclude password from response)
       const { rows: users, count: total } = await this.userRepository.findAndCountAll({
         where,
         include,
@@ -353,42 +78,11 @@ export class UsersService {
         order: order || [['createdAt', 'DESC']],
         limit,
         offset,
-        distinct: true, // Important for count with joins
+        distinct: true,
       });
 
-      // Fetch attachments for all users in parallel: O(n) where n = number of users
-      // This is more efficient than N+1 queries
       if (users.length > 0) {
-        const userIds = users.map(u => u.id);
-        const allAttachments = await Attachment.findAll({
-          where: {
-            entity_id: { [Op.in]: userIds },
-            entity_type: 'users',
-            is_active: true,
-            [Op.and]: [
-              Sequelize.literal('deleted_at IS NULL'),
-            ],
-          } as any,
-          attributes: ['id', 'path_URL', 'name', 'type', 'extension', 'entity_type', 'created_at', 'entity_id'],
-          order: [['created_at', 'DESC']],
-          paranoid: false, // We're handling deleted_at manually
-        });
-
-        // Group attachments by user_id
-        const attachmentsByUserId = new Map<string, Attachment[]>();
-        allAttachments.forEach(attachment => {
-          const userId = attachment.entity_id;
-          if (!attachmentsByUserId.has(userId)) {
-            attachmentsByUserId.set(userId, []);
-          }
-          attachmentsByUserId.get(userId)!.push(attachment);
-        });
-
-        // Attach attachments to each user (convert to plain objects for proper serialization)
-        users.forEach(user => {
-          const userAttachments = attachmentsByUserId.get(user.id) || [];
-          (user as any).attachments = userAttachments.map(att => att.toJSON());
-        });
+        await this.attachUserAttachments(users);
       }
 
       const pagination = getPaginationMetadata(total, page, limit);
@@ -411,11 +105,6 @@ export class UsersService {
     }
   }
 
-  /**
-   * Get a user by ID
-   * Optimized: User query + separate attachment query
-   * Note: UUID validation is handled by ParseUUIDPipe in controller
-   */
   async findOne(id: string) {
     const user = await this.userRepository.findOne({
       where: { id, is_active: true },
@@ -431,10 +120,7 @@ export class UsersService {
       });
     }
 
-    // Fetch attachments separately (polymorphic relationship): O(1)
-    const attachments = await getUserAttachments(id);
-    
-    // Convert to plain object and attach attachments for proper serialization
+    const attachments = await getEntityAttachments(id, 'users');
     const userResponse = user.toJSON();
     userResponse.attachments = attachments.map(att => att.toJSON());
 
@@ -444,16 +130,9 @@ export class UsersService {
     };
   }
 
-  /**
-   * Update a user
-   * Optimized: Check existence and conflict in parallel, single update query
-   * Note: UUID validation is handled by ParseUUIDPipe in controller
-   */
   async update(id: string, updateUserDto: UpdateUserDto, files?: Express.Multer.File[]) {
-
     const { department_ids, ...updateData } = updateUserDto;
 
-    // Check if user exists and check for conflicts in parallel
     const [user, conflictUser] = await Promise.all([
       this.userRepository.findOne({ where: { id, is_active: true }, attributes: ['id'] }),
       updateData.user_number ? this.userRepository.findOne({
@@ -482,156 +161,31 @@ export class UsersService {
       });
     }
 
-    // Start transaction
-    const transaction = await this.sequelize.transaction();
-
-    try {
-      // Verify departments exist if provided - cast UUIDs properly
+    return withTransaction(this.sequelize, async (transaction) => {
       if (department_ids !== undefined && department_ids.length > 0) {
-        // Cast each UUID string to UUID type using Sequelize.cast
-        // UUIDs validated by DTO @IsUUID decorator
-        const existingDepartments = await Department.findAll({
-          where: {
-            id: {
-              [Op.in]: department_ids.map(id => 
-                Sequelize.cast(id, 'UUID')
-              )
-            },
-            is_active: true,
-          },
-          attributes: ['id'],
-          transaction,
-        });
-        if (existingDepartments.length !== department_ids.length) {
-          await transaction.rollback();
-          const foundIdsSet = new Set(existingDepartments.map(d => d.id));
-          const missingIds = department_ids.filter(id => !foundIdsSet.has(id));
-          throw new NotFoundException({
-            message: `Department(s) not found: ${missingIds.join(', ')}`,
-            error: 'Not Found',
-            statusCode: 404,
-          });
-        }
+        await this.validateDepartments(department_ids, transaction);
       }
 
-      // Convert date strings to Date objects if present
-      const updateDataWithDates: any = { ...updateData };
-      if (updateData.join_date) {
-        updateDataWithDates.join_date = new Date(updateData.join_date);
-      }
-      if (updateData.contract_date) {
-        updateDataWithDates.contract_date = new Date(updateData.contract_date);
-      }
-      if (updateData.exit_date) {
-        updateDataWithDates.exit_date = new Date(updateData.exit_date);
-      }
+      const normalizedUpdateData = this.normalizeUpdateData(updateData);
+      await this.userRepository.update(normalizedUpdateData, { where: { id }, transaction });
 
-      // Ensure boolean values are properly converted (handle formData string values)
-      if (updateData.social_insurance !== undefined) {
-        updateDataWithDates.social_insurance = typeof updateData.social_insurance === 'boolean'
-          ? updateData.social_insurance
-          : (updateData.social_insurance === 'true' || updateData.social_insurance === '1');
-      }
-      if (updateData.medical_insurance !== undefined) {
-        updateDataWithDates.medical_insurance = typeof updateData.medical_insurance === 'boolean'
-          ? updateData.medical_insurance
-          : (updateData.medical_insurance === 'true' || updateData.medical_insurance === '1');
-      }
-
-      // Update user within transaction
-      await this.userRepository.update(updateDataWithDates, { where: { id }, transaction });
-
-      // Update departments if provided - use bulk operations to avoid UUID comparison issues
       if (department_ids !== undefined) {
-        // Remove all existing associations
-        await UserDepartment.destroy({
-          where: { user_id: id },
-          transaction,
-        });
-        // Add new associations if any
-        if (department_ids.length > 0) {
-          const userDepartmentRecords = department_ids.map(deptId => ({
-            user_id: id,
-            department_id: deptId,
-          }));
-          await UserDepartment.bulkCreate(userDepartmentRecords as any, { transaction });
-        }
+        await this.updateUserDepartments(id, department_ids, transaction);
       }
 
-      // Soft delete old attachments if new files are being uploaded
       if (files && files.length > 0) {
-        await Attachment.update(
-          { deleted_at: new Date(), is_active: false },
-          {
-            where: {
-              entity_id: id,
-              entity_type: 'users',
-              is_active: true,
-              [Op.and]: [
-                Sequelize.literal('deleted_at IS NULL'),
-              ],
-            } as any,
-            transaction,
-            paranoid: false, // We're handling deleted_at manually
-          }
-        );
+        await softDeleteEntityAttachments(id, 'users', transaction);
       }
 
-      // Commit transaction
-      await transaction.commit();
-
-      // File uploads (non-blocking, outside transaction): O(m) where m = number of files
       if (files && files.length > 0) {
-        try {
-          const savedAttachments = await this.attachmentUploadService.uploadAndSaveAttachments(files, id, 'users');
-          if (!savedAttachments || savedAttachments.length === 0) {
-            console.error('Warning: Files uploaded but no attachment records created');
-          }
-        } catch (fileError) {
-          console.error('File upload/attachment save failed:', fileError);
-          // Don't throw - user is already updated, just log the error
-        }
+        await this.handleFileUploads(files, id);
       }
-    } catch (error) {
-      // Rollback transaction on any error
-      try {
-        await transaction.rollback();
-      } catch (rollbackError) {
-        // Transaction might already be rolled back, ignore
-      }
-      // Re-throw the error so NestJS can handle it
-      throw error;
-    }
 
-    // Fetch updated user with relations (exclude password from response)
-    const updatedUser = await this.userRepository.findOne({
-      where: { id, is_active: true },
-      include: getUserIncludes(),
-      attributes: { exclude: ['password'] },
+      return this.buildUserResponse(id);
     });
-
-    // Fetch attachments separately (polymorphic relationship): O(1)
-    const attachments = await getUserAttachments(id);
-    
-    // Convert to plain object and attach attachments for proper serialization
-    const userResponse = updatedUser ? updatedUser.toJSON() : null;
-    if (userResponse) {
-      userResponse.attachments = attachments.map(att => att.toJSON());
-    }
-
-    return {
-      message: 'User updated successfully',
-      user: userResponse,
-    };
   }
 
-  /**
-   * Soft delete a user
-   * Optimized: Single update query
-   * Note: UUID validation is handled by ParseUUIDPipe in controller
-   */
   async remove(id: string) {
-    // Check if user exists
     const user = await this.userRepository.findOne({
       where: { id, is_active: true },
       attributes: ['id'],
@@ -645,48 +199,312 @@ export class UsersService {
       });
     }
 
-    // Start transaction for atomicity
-    const transaction = await this.sequelize.transaction();
-
-    try {
-      // Soft delete user - set both deletedAt and is_active
+    return withTransaction(this.sequelize, async (transaction) => {
       await this.userRepository.update(
         { deletedAt: new Date(), is_active: false },
         { where: { id, is_active: true }, transaction }
       );
 
-      // Soft delete all attachments related to this user
-      await Attachment.update(
-        { deleted_at: new Date(), is_active: false },
-        {
-          where: {
-            entity_id: id,
-            entity_type: 'users',
-            is_active: true,
-            [Op.and]: [
-              Sequelize.literal('deleted_at IS NULL'),
-            ],
-          } as any,
-          transaction,
-          paranoid: false, // We're handling deleted_at manually
-        }
-      );
-
-      // Commit transaction
-      await transaction.commit();
+      await softDeleteEntityAttachments(id, 'users', transaction);
 
       return {
         message: 'User deleted successfully',
         userId: id,
       };
-    } catch (error) {
-      // Rollback on any error
-      try {
-        await transaction.rollback();
-      } catch (rollbackError) {
-        // Ignore rollback errors
-      }
-      throw error;
+    });
+  }
+
+  private async validateUserUniqueness(
+    userNumber: string,
+    username: string | null,
+    transaction?: any
+  ): Promise<void> {
+    const [existingUserByNumber, existingUserByUsername] = await Promise.all([
+      this.userRepository.findOne({
+        where: { user_number: userNumber },
+        attributes: ['id'],
+        transaction,
+      }),
+      username ? this.userRepository.findOne({
+        where: { username },
+        attributes: ['id'],
+        transaction,
+      }) : Promise.resolve(null),
+    ]);
+
+    if (existingUserByNumber) {
+      throw new ConflictException({
+        message: 'User with this user number already exists',
+        error: 'Conflict',
+        statusCode: 409,
+      });
     }
+
+    if (existingUserByUsername) {
+      throw new ConflictException({
+        message: 'User with this username already exists',
+        error: 'Conflict',
+        statusCode: 409,
+      });
+    }
+  }
+
+  private async validateRole(roleName: string, transaction?: any): Promise<Role> {
+    const role = await this.roleRepository.findOne({
+      where: { name: roleName },
+      attributes: ['id', 'name'],
+      transaction,
+    });
+
+    if (!role) {
+      throw new NotFoundException({
+        message: `Role '${roleName}' not found. Available roles: admin, user`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
+    }
+
+    return role;
+  }
+
+  private async validateDepartments(departmentIds: string[] | undefined, transaction?: any): Promise<void> {
+    if (!departmentIds || departmentIds.length === 0) {
+      return;
+    }
+
+    const existingDepartments = await Department.findAll({
+      where: {
+        id: {
+          [Op.in]: departmentIds.map(id => Sequelize.cast(id, 'UUID'))
+        },
+        is_active: true,
+      },
+      attributes: ['id'],
+      transaction,
+    });
+
+    if (existingDepartments.length !== departmentIds.length) {
+      const foundIdsSet = new Set(existingDepartments.map(d => d.id));
+      const missingIds = departmentIds.filter(id => !foundIdsSet.has(id));
+      throw new NotFoundException({
+        message: `Department(s) not found: ${missingIds.join(', ')}`,
+        error: 'Not Found',
+        statusCode: 404,
+      });
+    }
+  }
+
+  private async normalizeUserData(
+    userData: any,
+    password: string,
+    personalPhone: string[] | undefined,
+    roleId: string
+  ): Promise<any> {
+    const hashedPassword = await hashPassword(password);
+    
+    const socialInsurance = this.normalizeBoolean(userData.social_insurance);
+    const medicalInsurance = this.normalizeBoolean(userData.medical_insurance);
+
+    return {
+      ...userData,
+      password: hashedPassword,
+      role_id: roleId,
+      personal_phone: personalPhone && personalPhone.length > 0 ? personalPhone : null,
+      social_insurance: socialInsurance,
+      medical_insurance: medicalInsurance,
+      join_date: userData.join_date ? new Date(userData.join_date) : undefined,
+      contract_date: userData.contract_date ? new Date(userData.contract_date) : undefined,
+      exit_date: userData.exit_date ? new Date(userData.exit_date) : undefined,
+    };
+  }
+
+  private normalizeUpdateData(updateData: any): any {
+    const normalized: any = { ...updateData };
+
+    if (updateData.join_date) {
+      normalized.join_date = new Date(updateData.join_date);
+    }
+    if (updateData.contract_date) {
+      normalized.contract_date = new Date(updateData.contract_date);
+    }
+    if (updateData.exit_date) {
+      normalized.exit_date = new Date(updateData.exit_date);
+    }
+
+    if (updateData.social_insurance !== undefined) {
+      normalized.social_insurance = this.normalizeBoolean(updateData.social_insurance);
+    }
+
+    if (updateData.medical_insurance !== undefined) {
+      normalized.medical_insurance = this.normalizeBoolean(updateData.medical_insurance);
+    }
+
+    return normalized;
+  }
+
+  private async createUserDepartments(
+    userId: string,
+    departmentIds: string[],
+    transaction: any
+  ): Promise<void> {
+    const userDepartmentRecords = departmentIds.map(deptId => ({
+      user_id: userId,
+      department_id: deptId,
+    }));
+    await UserDepartment.bulkCreate(userDepartmentRecords as any, { transaction });
+  }
+
+  private async updateUserDepartments(
+    userId: string,
+    departmentIds: string[],
+    transaction: any
+  ): Promise<void> {
+    await UserDepartment.destroy({
+      where: { user_id: userId },
+      transaction,
+    });
+
+    if (departmentIds.length > 0) {
+      await this.createUserDepartments(userId, departmentIds, transaction);
+    }
+  }
+
+  private async buildUserWhereClause(filterDto?: UserFilterDto): Promise<any> {
+    const where: any = { is_active: true };
+
+    if (filterDto?.user_number) {
+      where.user_number = { [Op.iLike]: `%${filterDto.user_number}%` };
+    }
+
+    if (filterDto?.name) {
+      where.name = { [Op.iLike]: `%${filterDto.name}%` };
+    }
+
+    if (filterDto?.work_location) {
+      where.work_location = filterDto.work_location;
+    }
+
+    if (filterDto?.social_insurance !== undefined && filterDto?.social_insurance !== null) {
+      where.social_insurance = this.normalizeBoolean(filterDto.social_insurance);
+    }
+
+    if (filterDto?.medical_insurance !== undefined && filterDto?.medical_insurance !== null) {
+      where.medical_insurance = this.normalizeBoolean(filterDto.medical_insurance);
+    }
+
+    if (filterDto?.title) {
+      where.title = { [Op.iLike]: `%${filterDto.title}%` };
+    }
+
+    if (filterDto?.search) {
+      const searchWhere = buildSearchClause(filterDto.search, ['user_number', 'name', 'address', 'title']);
+      if (searchWhere) {
+        Object.assign(where, searchWhere);
+      }
+    }
+
+    if (filterDto?.joinDateFrom || filterDto?.joinDateTo) {
+      const dateRangeWhere = buildDateRangeClause(
+        filterDto.joinDateFrom,
+        filterDto.joinDateTo,
+        'join_date'
+      );
+      if (dateRangeWhere) {
+        Object.assign(where, dateRangeWhere);
+      }
+    }
+
+    return where;
+  }
+
+  private async applyRoleFilter(where: any, roleName: string): Promise<any> {
+    const role = await this.roleRepository.findOne({
+      where: { name: roleName, is_active: true },
+      attributes: ['id'],
+    });
+
+    if (!role) {
+      return { ...where, id: { [Op.eq]: null } };
+    }
+
+    where.role_id = role.id;
+    return where;
+  }
+
+  private buildUserIncludes(departmentId?: string): any[] {
+    if (departmentId) {
+      return [
+        { model: Role, as: 'role', attributes: ['id', 'name'] },
+        {
+          model: Department,
+          as: 'departments',
+          where: { id: departmentId },
+          required: true,
+          attributes: ['id', 'name'],
+          through: { attributes: [] },
+        },
+      ];
+    }
+    return getUserIncludes();
+  }
+
+  private async attachUserAttachments(users: User[]): Promise<void> {
+    const userIds = users.map(u => u.id);
+    const allAttachments = await getBatchEntityAttachments(userIds, 'users');
+
+    const attachmentsByUserId = new Map<string, typeof allAttachments>();
+    allAttachments.forEach(attachment => {
+      const userId = attachment.entity_id;
+      if (!attachmentsByUserId.has(userId)) {
+        attachmentsByUserId.set(userId, []);
+      }
+      attachmentsByUserId.get(userId)!.push(attachment);
+    });
+
+    users.forEach(user => {
+      const userAttachments = attachmentsByUserId.get(user.id) || [];
+      (user as any).attachments = userAttachments.map(att => att.toJSON());
+    });
+  }
+
+  private async buildUserResponse(userId: string) {
+    const user = await this.userRepository.findByPk(userId, {
+      include: getUserIncludes(),
+      attributes: { exclude: ['password'] },
+    });
+
+    const attachments = await getEntityAttachments(userId, 'users');
+    const userResponse = user ? user.toJSON() : null;
+    
+    if (userResponse) {
+      userResponse.attachments = attachments.map(att => att.toJSON());
+    }
+
+    return {
+      message: user ? 'User updated successfully' : 'User created successfully',
+      user: userResponse,
+    };
+  }
+
+  private async handleFileUploads(files: Express.Multer.File[], userId: string): Promise<void> {
+    try {
+      const savedAttachments = await this.attachmentUploadService.uploadAndSaveAttachments(files, userId, 'users');
+      if (!savedAttachments || savedAttachments.length === 0) {
+        console.error('Warning: Files uploaded but no attachment records created');
+      }
+    } catch (fileError) {
+      console.error('File upload/attachment save failed:', fileError);
+    }
+  }
+
+  private normalizeBoolean(value: any): boolean {
+    if (typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'string') {
+      const lowerValue = value.toLowerCase().trim();
+      return lowerValue === 'true' || lowerValue === '1';
+    }
+    return false;
   }
 }
