@@ -9,11 +9,13 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
+  HttpException,
   ValidationPipe,
   Query,
   UseInterceptors,
   UploadedFiles,
   ParseUUIDPipe,
+  Request,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
@@ -64,6 +66,46 @@ export class UsersController {
   @ApiResponse({ status: 400, description: 'Validation error - Invalid filter parameters' })
   findAll(@Query(ValidationPipe) filterDto: UserFilterDto) {
     return this.usersService.findAll(filterDto);
+  }
+
+  @Get('me')
+  @Roles() // Override controller-level admin role - allow any authenticated user
+  @ApiOperation({ 
+    summary: 'Get current user profile',
+    description: 'Retrieves the profile of the currently authenticated user. Available to all authenticated users.'
+  })
+  @ApiResponse({ status: 200, description: 'User profile retrieved successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  getCurrentUser(@Request() req) {
+    // req.user is set by AuthGuard
+    const userId = req.user?.sub || req.user?.id;
+    if (!userId) {
+      throw new HttpException('User ID not found in token', HttpStatus.UNAUTHORIZED);
+    }
+    return this.usersService.findOne(userId);
+  }
+
+  @Patch('me')
+  @Roles() // Override controller-level admin role - allow any authenticated user
+  @UseInterceptors(FilesInterceptor('images', 10, multerConfig))
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ 
+    summary: 'Update current user profile',
+    description: 'Updates the profile of the currently authenticated user. Available to all authenticated users.'
+  })
+  @ApiBody({ type: UpdateUserDto })
+  @ApiResponse({ status: 200, description: 'User profile updated successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  updateCurrentUser(
+    @Request() req,
+    @Body(ValidationPipe) updateUserDto: UpdateUserDto,
+    @UploadedFiles() files?: Express.Multer.File[],
+  ) {
+    const userId = req.user?.sub || req.user?.id;
+    if (!userId) {
+      throw new HttpException('User ID not found in token', HttpStatus.UNAUTHORIZED);
+    }
+    return this.usersService.update(userId, updateUserDto, files);
   }
 
   @Get(':id')

@@ -108,8 +108,9 @@ export class AuthGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
 
-    if (!requiredRoles) {
-      return true; // No role requirement
+    // If no roles required or empty array, allow any authenticated user
+    if (!requiredRoles || requiredRoles.length === 0) {
+      return true; // No role requirement - any authenticated user can access
     }
 
     const userRole = (request as any).user?.role_name as RoleName;
