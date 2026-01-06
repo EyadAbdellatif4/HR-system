@@ -27,6 +27,12 @@ export class UpdateUserDto {
   @IsOptional()
   name?: string;
 
+  @ApiPropertyOptional({ example: 'john.doe@example.com', description: 'Username (email)' })
+  @TransformEmptyToUndefined()
+  @IsString()
+  @IsOptional()
+  username?: string;
+
   @ApiPropertyOptional({ example: '123 Main St, City, Country', description: 'User address' })
   @TransformEmptyToUndefined()
   @IsString()
