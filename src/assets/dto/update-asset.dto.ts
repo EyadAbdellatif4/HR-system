@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsString, IsOptional, IsEnum } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { AssetType } from '../enums';
+import { AssetType, AssetStatus } from '../enums';
 
 /**
  * Transforms empty strings to undefined for optional fields
@@ -135,11 +135,11 @@ export class UpdateAssetDto {
   @IsOptional()
   phone_comment?: string;
 
-  @ApiPropertyOptional({ example: 'Active', description: 'The status of the asset' })
+  @ApiPropertyOptional({ enum: AssetStatus, example: AssetStatus.ACTIVE, description: 'The status of the asset' })
   @TransformEmptyToUndefined()
-  @IsString()
+  @IsEnum(AssetStatus)
   @IsOptional()
-  status?: string;
+  status?: AssetStatus;
 
   @ApiPropertyOptional({ example: 'Additional details about the asset', description: 'Additional details' })
   @TransformEmptyToUndefined()

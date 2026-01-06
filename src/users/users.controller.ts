@@ -65,6 +65,7 @@ export class UsersController {
   @ApiResponse({ status: 200, description: 'Users retrieved successfully' })
   @ApiResponse({ status: 400, description: 'Validation error - Invalid filter parameters' })
   findAll(@Query(ValidationPipe) filterDto: UserFilterDto) {
+    
     return this.usersService.findAll(filterDto);
   }
 

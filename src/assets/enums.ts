@@ -7,3 +7,8 @@ export enum AssetType {
   LAPTOP = 'laptop',
 }
 
+export enum AssetStatus {
+  ACTIVE = 'Active',
+  INACTIVE = 'Inactive',
+}
+
