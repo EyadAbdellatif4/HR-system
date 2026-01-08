@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsUUID, IsDateString, IsString } from 'class-validator';
+import { IsOptional, IsUUID, IsDateString, IsString, IsBoolean } from 'class-validator';
+import { Transform } from 'class-transformer';
 import { BaseFilterDto } from '../../shared/dto/base-filter.dto';
 
 export class AssetTrackingFilterDto extends BaseFilterDto {
@@ -38,5 +39,18 @@ export class AssetTrackingFilterDto extends BaseFilterDto {
   @IsString()
   @IsOptional()
   createdTo?: string;
+
+  @ApiPropertyOptional({ 
+    example: true, 
+    description: 'If true, only return active assignments (removed_at is null). Used for asset tree view.' 
+  })
+  @IsBoolean()
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return undefined;
+  })
+  activeOnly?: boolean;
 }
 
