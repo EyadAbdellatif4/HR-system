@@ -34,7 +34,7 @@ export class AssetTrackingService {
         removed_at: removed_at ? new Date(removed_at) : null,
       } as any, { transaction });
 
-      const createdTracking = await this.assetTrackingRepository.findByPk(tracking.id, {
+      const createdTracking = await this.assetTrackingRepository.unscoped().findByPk(tracking.id, {
         include: this.getTrackingIncludes(),
         transaction,
       });
@@ -57,7 +57,8 @@ export class AssetTrackingService {
         filterDto?.sortOrder || 'DESC'
       );
 
-      const { rows: assetTrackings, count: total } = await this.assetTrackingRepository.findAndCountAll({
+      // Use unscoped to get all records including removed ones for dashboard/listing
+      const { rows: assetTrackings, count: total } = await this.assetTrackingRepository.unscoped().findAndCountAll({
         where,
         include: this.getTrackingIncludes(),
         order: order || [['createdAt', 'DESC']],
@@ -89,7 +90,8 @@ export class AssetTrackingService {
   async findOne(id: string) {
     this.validateTrackingId(id);
 
-    const assetTracking = await this.assetTrackingRepository.findOne({
+    // Use unscoped to allow viewing removed assets by ID
+    const assetTracking = await this.assetTrackingRepository.unscoped().findOne({
       where: { id, is_active: true },
       include: this.getTrackingIncludes(),
     });
@@ -121,7 +123,7 @@ export class AssetTrackingService {
         transaction,
       });
 
-      const updatedTracking = await this.assetTrackingRepository.findOne({
+      const updatedTracking = await this.assetTrackingRepository.unscoped().findOne({
         where: { id, is_active: true },
         include: this.getTrackingIncludes(),
         transaction,
@@ -165,7 +167,7 @@ export class AssetTrackingService {
   }
 
   private async checkTrackingExists(id: string, transaction?: Transaction): Promise<void> {
-    const assetTracking = await this.assetTrackingRepository.findOne({
+    const assetTracking = await this.assetTrackingRepository.unscoped().findOne({
       where: { id, is_active: true },
       attributes: ['id'],
       transaction,
@@ -178,8 +180,14 @@ export class AssetTrackingService {
 
   private buildTrackingWhereClause(filterDto?: AssetTrackingFilterDto): any {
     const where: any = {
-      is_active: true,
+      is_active: true, // Always exclude inactive records (is_active = false)
     };
+
+    // If activeOnly is true (used for asset tree), filter out removed assets
+    // If activeOnly is false/undefined (used for dashboard), include all records including removed ones
+    if (filterDto?.activeOnly === true) {
+      where.removed_at = null;
+    }
 
     if (filterDto?.asset_id) {
       where.asset_id = filterDto.asset_id;
